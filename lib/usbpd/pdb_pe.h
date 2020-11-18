@@ -60,8 +60,10 @@ struct pdb_pe {
     uint8_t _pps_index;
     /* The index of the just-requested PPS APDO */
     uint8_t _last_pps;
-    /* Virtual timer for SinkPPSPeriodicTimer */
-    void *_sink_pps_periodic_timer;
+    /* Last time of SinkPPSPeriodicTimer */
+    uint32_t _sink_pps_last_time;
+    /* True if PPS periodic timer active */
+    bool _sink_pps_timer_enabled;
     /* Queue for the PE mailbox */
     void *_mailbox_queue[PDB_MSG_POOL_SIZE];
 };

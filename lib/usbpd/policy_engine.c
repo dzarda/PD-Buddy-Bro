@@ -30,13 +30,6 @@
 #include "pt-evt.h"
 
 
-static void pe_sink_pps_periodic_timer_cb(void *cfg)
-{
-    /* Signal the PE thread to make a new PPS request */
-    ((struct pdb_config *) cfg)->pe.events |= PDB_EVT_PE_PPS_REQUEST;
-}
-
-
 enum policy_engine_state {
     PESinkStartup,
     PESinkDiscovery,
@@ -223,11 +216,11 @@ static PT_THREAD(pe_sink_select_cap(struct pt *pt, struct pdb_config *cfg, enum 
     if ((cfg->pe.hdr_template & PD_HDR_SPECREV) == PD_SPECREV_3_0) {
         /* If the request was for a PPS APDO, start SinkPPSPeriodicTimer */
         if (PD_RDO_OBJPOS_GET(cfg->pe._last_dpm_request) >= cfg->pe._pps_index) {
-            chVTSet(&cfg->pe._sink_pps_periodic_timer, PD_T_PPS_REQUEST,
-                    pe_sink_pps_periodic_timer_cb, cfg);
+            cfg->pe._sink_pps_timer_enabled = true;
+            cfg->pe._sink_pps_last_time = millis();
         /* Otherwise, stop SinkPPSPeriodicTimer */
         } else {
-            chVTReset(&cfg->pe._sink_pps_periodic_timer);
+            cfg->pe._sink_pps_timer_enabled = false;
         }
     }
     /* This will use a virtual timer to send an event flag to this thread after
@@ -879,8 +872,9 @@ static PT_THREAD(PolicyEngine(struct pt *pt, struct pdb_config *cfg))
 
     /* Initialize the mailbox */
     chMBObjectInit(&cfg->pe.mailbox, cfg->pe._mailbox_queue, PDB_MSG_POOL_SIZE);
-    /* Initialize the VT for SinkPPSPeriodicTimer */
-    chVTObjectInit(&cfg->pe._sink_pps_periodic_timer);
+    /* Initialize the timebase for SinkPPSPeriodicTimer */
+    cfg->pe._sink_pps_last_time = 0;
+    cfg->pe._sink_pps_timer_enabled = false;
     /* Initialize the old_tcc_match */
     cfg->pe._old_tcc_match = -1;
     /* Initialize the pps_index */
@@ -956,4 +950,13 @@ static PT_THREAD(PolicyEngine(struct pt *pt, struct pdb_config *cfg))
 void pdb_pe_run(struct pdb_config *cfg)
 {
     (void)PT_SCHEDULE(PolicyEngine(&cfg->pe.thread, cfg));
+
+    if (cfg->pe._sink_pps_timer_enabled) {
+        uint32_t now = millis();
+        if (now - cfg->pe._sink_pps_last_time > PD_T_PPS_REQUEST) {
+            /* Signal the PE thread to make a new PPS request */
+            cfg->pe.events |= PDB_EVT_PE_PPS_REQUEST;
+            cfg->pe._sink_pps_last_time = now;
+        }
+    }
 }

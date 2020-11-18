@@ -78,7 +78,7 @@ static PT_THREAD(protocol_tx_wait_message(struct pt *pt, struct pdb_config *cfg,
     PT_BEGIN(pt);
     /* Wait for an event */
     static uint32_t evt;
-    PT_EVT_WAIT(pt, &cfg->prl.tx, PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD | PDB_EVT_PRLTX_MSG_TX);
+    PT_EVT_WAIT(pt, &cfg->prl.tx_events, PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD | PDB_EVT_PRLTX_MSG_TX, &evt);
 
     if (evt & PDB_EVT_PRLTX_RESET) {
         *res = PRLTxPHYReset;
