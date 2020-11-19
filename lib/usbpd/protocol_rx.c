@@ -20,7 +20,6 @@
 #include <stdlib.h>
 
 #include <pd.h>
-#include "priorities.h"
 #include "policy_engine.h"
 #include "protocol_tx.h"
 #include "fusb302b.h"
@@ -61,12 +60,12 @@ static PT_THREAD(protocol_rx_wait_phy(struct pt *pt, struct pdb_config *cfg, enu
     if (evt & PDB_EVT_PRLRX_I_GCRCSENT) {
         /* Get a buffer to read the message into.  Guaranteed to not fail
          * because we have a big enough pool and are careful. */
-        cfg->prl._rx_message = chPoolAlloc(&pdb_msg_pool);
+        cfg->prl._rx_message = pd_msg_empty;
         /* Read the message */
-        fusb_read_message(&cfg->fusb, cfg->prl._rx_message);
+        fusb_read_message(&cfg->fusb, &cfg->prl._rx_message);
         /* If it's a Soft_Reset, go to the soft reset state */
-        if (PD_MSGTYPE_GET(cfg->prl._rx_message) == PD_MSGTYPE_SOFT_RESET
-                && PD_NUMOBJ_GET(cfg->prl._rx_message) == 0) {
+        if (PD_MSGTYPE_GET(&cfg->prl._rx_message) == PD_MSGTYPE_SOFT_RESET
+                && PD_NUMOBJ_GET(&cfg->prl._rx_message) == 0) {
             *res = PRLRxReset;
             PT_EXIT(pt);
         /* Otherwise, check the message ID */
@@ -99,8 +98,7 @@ static PT_THREAD(protocol_rx_reset(struct pt *pt, struct pdb_config *cfg, enum p
 
     /* If we got a RESET signal, reset the machine */
     if (PT_EVT_GETANDCLEAR(&cfg->prl.rx_events, PDB_EVT_PRLRX_RESET) != 0) {
-        chPoolFree(&pdb_msg_pool, cfg->prl._rx_message);
-        cfg->prl._rx_message = NULL;
+        cfg->prl._rx_message = pd_msg_empty;
         *res = PRLRxWaitPHY;
         PT_EXIT(pt);
     }
@@ -118,17 +116,15 @@ static PT_THREAD(protocol_rx_check_messageid(struct pt *pt, struct pdb_config *c
     PT_BEGIN(pt);
     /* If we got a RESET signal, reset the machine */
     if (PT_EVT_GETANDCLEAR(&cfg->prl.rx_events, PDB_EVT_PRLRX_RESET) != 0) {
-        chPoolFree(&pdb_msg_pool, cfg->prl._rx_message);
-        cfg->prl._rx_message = NULL;
+        cfg->prl._rx_message = pd_msg_empty;
         *res = PRLRxWaitPHY;
         PT_EXIT(pt);
     }
 
     /* If the message has the stored ID, we've seen this message before.  Free
      * it and don't pass it to the policy engine. */
-    if (PD_MESSAGEID_GET(cfg->prl._rx_message) == cfg->prl._rx_messageid) {
-        chPoolFree(&pdb_msg_pool, cfg->prl._rx_message);
-        cfg->prl._rx_message = NULL;
+    if (PD_MESSAGEID_GET(&cfg->prl._rx_message) == cfg->prl._rx_messageid) {
+        cfg->prl._rx_message = pd_msg_empty;
         *res = PRLRxWaitPHY;
         PT_EXIT(pt);
     /* Otherwise, there's either no stored ID or this message has an ID we
@@ -151,10 +147,10 @@ static PT_THREAD(protocol_rx_store_messageid(struct pt *pt, struct pdb_config *c
     PT_YIELD(pt);
 
     /* Update the stored MessageID */
-    cfg->prl._rx_messageid = PD_MESSAGEID_GET(cfg->prl._rx_message);
+    cfg->prl._rx_messageid = PD_MESSAGEID_GET(&cfg->prl._rx_message);
 
     /* Pass the message to the policy engine. */
-    chMBPostTimeout(&cfg->pe.mailbox, (msg_t) cfg->prl._rx_message, TIME_IMMEDIATE);
+    pt_queue_push(&cfg->pe.mailbox, cfg->prl._rx_message);
     cfg->pe.events |= PDB_EVT_PE_MSG_RX;
 
     /* Don't check if we got a RESET because we'd do nothing different. */

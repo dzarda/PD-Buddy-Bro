@@ -17,8 +17,7 @@
 
 #include "int_n.h"
 
-#include <pdb.h>
-#include "priorities.h"
+#include "pdb.h"
 #include "fusb302b.h"
 #include "protocol_rx.h"
 #include "protocol_tx.h"

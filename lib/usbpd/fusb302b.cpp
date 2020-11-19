@@ -23,6 +23,10 @@ extern "C" {
 
 #include "fusb302b.h"
 
+extern "C" uint32_t millis() {
+    return HAL_GetTick();
+}
+
 /*
  * Read a single byte from the FUSB302B
  *

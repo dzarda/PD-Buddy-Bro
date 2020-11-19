@@ -17,14 +17,14 @@
 
 #include "protocol_tx.h"
 
-#include <pd.h>
-#include "priorities.h"
+#include "pd.h"
 #include "policy_engine.h"
 #include "protocol_rx.h"
 #include "fusb302b.h"
 
 #include "pt.h"
 #include "pt-evt.h"
+#include "pt-queue.h"
 
 
 /*
@@ -92,16 +92,16 @@ static PT_THREAD(protocol_tx_wait_message(struct pt *pt, struct pdb_config *cfg,
     /* If the policy engine is trying to send a message */
     if (evt & PDB_EVT_PRLTX_MSG_TX) {
         /* Get the message */
-        chMBFetchTimeout(&cfg->prl.tx_mailbox, (msg_t *) &cfg->prl._tx_message, TIME_IMMEDIATE);
+        cfg->prl._tx_message = pt_queue_pop(&cfg->prl.tx_mailbox);
         /* If it's a Soft_Reset, reset the TX layer first */
         if (PD_MSGTYPE_GET(cfg->prl._tx_message) == PD_MSGTYPE_SOFT_RESET
                 && PD_NUMOBJ_GET(cfg->prl._tx_message) == 0) {
             *res = PRLTxReset;
-        PT_EXIT(pt);
+            PT_EXIT(pt);
         /* Otherwise, just send the message */
         } else {
             *res = PRLTxConstructMessage;
-        PT_EXIT(pt);
+            PT_EXIT(pt);
         }
     }
 
@@ -277,7 +277,8 @@ static PT_THREAD(ProtocolTX(struct pt *pt, struct pdb_config *cfg))
     static struct pt child;
 
     /* Initialize the mailbox */
-    chMBObjectInit(&cfg->prl.tx_mailbox, cfg->prl._tx_mailbox_queue, PDB_MSG_POOL_SIZE);
+    cfg->prl.tx_mailbox.r = 0;
+    cfg->prl.tx_mailbox.w = 0;
 
     while (true) {
         switch (state) {

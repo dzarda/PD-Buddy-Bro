@@ -20,7 +20,7 @@
 
 #include <stdint.h>
 
-#include "pdb_conf.h"
+#include "pdb_msg.h"
 
 #include "pt.h"
 
@@ -39,19 +39,17 @@ struct pdb_prl {
     uint32_t hardrst_events;
 
     /* TX mailbox for PD messages to be transmitted */
-    void *tx_mailbox;
+    pd_msg_queue_t tx_mailbox;
 
     /* The ID of the last message received */
     int8_t _rx_messageid;
     /* The message being worked with by the RX thread */
-    union pd_msg *_rx_message;
+    union pd_msg _rx_message;
 
     /* The ID of the next message we will transmit */
     int8_t _tx_messageidcounter;
     /* The message being worked with by the TX thread */
     union pd_msg *_tx_message;
-    /* Queue for the TX mailbox */
-    void *_tx_mailbox_queue[PDB_MSG_POOL_SIZE];
 };
 
 #endif /* PDB_PRL_H */

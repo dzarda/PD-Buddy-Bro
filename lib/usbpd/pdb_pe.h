@@ -18,10 +18,12 @@
 #ifndef PDB_PE_H
 #define PDB_PE_H
 
+#include "pdb_msg.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "pdb_conf.h"
+#include "pt-queue.h"
 
 /*
  * Events for the Policy Engine thread, sent by user code
@@ -35,19 +37,19 @@
  * Structure for Policy Engine thread and variables
  */
 struct pdb_pe {
-    /* Policy Engine thread and working area */
+    /* Policy Engine thread and event variable */
     struct pt thread;
     uint32_t events;
 
     /* PE mailbox for received PD messages */
-    void *mailbox;
+    pd_msg_queue_t mailbox;
     /* PD message header template */
     uint16_t hdr_template;
 
     /* The received message we're currently working with */
     union pd_msg *_message;
     /* The most recent Request from the DPM */
-    union pd_msg *_last_dpm_request;
+    union pd_msg _last_dpm_request;
     /* Whether or not we have an explicit contract */
     bool _explicit_contract;
     /* Whether or not we're receiving minimum power */
@@ -64,8 +66,5 @@ struct pdb_pe {
     uint32_t _sink_pps_last_time;
     /* True if PPS periodic timer active */
     bool _sink_pps_timer_enabled;
-    /* Queue for the PE mailbox */
-    void *_mailbox_queue[PDB_MSG_POOL_SIZE];
 };
-
 #endif /* PDB_PE_H */

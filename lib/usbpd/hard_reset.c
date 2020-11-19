@@ -18,7 +18,6 @@
 #include "hard_reset.h"
 
 #include "pd.h"
-#include "priorities.h"
 #include "policy_engine.h"
 #include "protocol_rx.h"
 #include "protocol_tx.h"

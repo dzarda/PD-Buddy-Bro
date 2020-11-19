@@ -18,8 +18,6 @@
 #ifndef PDB_INT_N_H
 #define PDB_INT_N_H
 
-#include "pdb_conf.h"
-
 #include "pt.h"
 
 /*

@@ -21,7 +21,6 @@
 #include <stdbool.h>
 
 #include <pd.h>
-#include "priorities.h"
 #include "protocol_tx.h"
 #include "hard_reset.h"
 #include "fusb302b.h"
@@ -106,7 +105,7 @@ static PT_THREAD(pe_sink_wait_cap(struct pt *pt, struct pdb_config *cfg, enum po
     /* If we got a message */
     if (evt & PDB_EVT_PE_MSG_RX) {
         /* Get the message */
-        if (chMBFetchTimeout(&cfg->pe.mailbox, (msg_t *) &cfg->pe._message, TIME_IMMEDIATE) == MSG_OK) {
+        if ((cfg->pe._message = pt_queue_pop(&cfg->pe.mailbox))) {
             /* If we got a Source_Capabilities message, read it. */
             if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_SOURCE_CAPABILITIES
                     && PD_NUMOBJ_GET(cfg->pe._message) > 0) {
@@ -127,14 +126,12 @@ static PT_THREAD(pe_sink_wait_cap(struct pt *pt, struct pdb_config *cfg, enum po
             /* If the message was a Soft_Reset, do the soft reset procedure */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_SOFT_RESET
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSoftReset;
                 PT_EXIT(pt);
             /* If we got an unexpected message, reset */
             } else {
                 /* Free the received message */
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 *res = PESinkHardReset;
                 PT_EXIT(pt);
             }
@@ -169,20 +166,18 @@ static PT_THREAD(pe_sink_eval_cap(struct pt *pt, struct pdb_config *cfg, enum po
         cfg->pe._last_pps = 8;
     }
     /* Get a message object for the request if we don't have one already */
-    if (cfg->pe._last_dpm_request == NULL) {
-        cfg->pe._last_dpm_request = chPoolAlloc(&pdb_msg_pool);
+
+    /* Remember the last PDO we requested if it was a PPS APDO */
+    if (PD_RDO_OBJPOS_GET(&cfg->pe._last_dpm_request) >= cfg->pe._pps_index) {
+        cfg->pe._last_pps = PD_RDO_OBJPOS_GET(&cfg->pe._last_dpm_request);
+    /* Otherwise, forget any PPS APDO we had requested */
     } else {
-        /* Remember the last PDO we requested if it was a PPS APDO */
-        if (PD_RDO_OBJPOS_GET(cfg->pe._last_dpm_request) >= cfg->pe._pps_index) {
-            cfg->pe._last_pps = PD_RDO_OBJPOS_GET(cfg->pe._last_dpm_request);
-        /* Otherwise, forget any PPS APDO we had requested */
-        } else {
-            cfg->pe._last_pps = 8;
-        }
+        cfg->pe._last_pps = 8;
     }
+
     /* Ask the DPM what to request */
     cfg->dpm.evaluate_capability(cfg, cfg->pe._message,
-            cfg->pe._last_dpm_request);
+            &cfg->pe._last_dpm_request);
     /* It's up to the DPM to free the Source_Capabilities message, which it can
      * do whenever it sees fit.  Just remove our reference to it since we won't
      * know when it's no longer valid. */
@@ -196,7 +191,7 @@ static PT_THREAD(pe_sink_select_cap(struct pt *pt, struct pdb_config *cfg, enum 
 {
     PT_BEGIN(pt);
     /* Transmit the request */
-    chMBPostTimeout(&cfg->prl.tx_mailbox, (msg_t) cfg->pe._last_dpm_request, TIME_IMMEDIATE);
+    pt_queue_push(&cfg->prl.tx_mailbox, cfg->pe._last_dpm_request);
     cfg->prl.tx_events |= PDB_EVT_PRLTX_MSG_TX;
     static uint32_t evt;
     PT_EVT_WAIT(pt, &cfg->pe.events, PDB_EVT_PE_TX_DONE | PDB_EVT_PE_TX_ERR | PDB_EVT_PE_RESET, &evt);
@@ -215,7 +210,7 @@ static PT_THREAD(pe_sink_select_cap(struct pt *pt, struct pdb_config *cfg, enum 
     /* If we're using PD 3.0 */
     if ((cfg->pe.hdr_template & PD_HDR_SPECREV) == PD_SPECREV_3_0) {
         /* If the request was for a PPS APDO, start SinkPPSPeriodicTimer */
-        if (PD_RDO_OBJPOS_GET(cfg->pe._last_dpm_request) >= cfg->pe._pps_index) {
+        if (PD_RDO_OBJPOS_GET(&cfg->pe._last_dpm_request) >= cfg->pe._pps_index) {
             cfg->pe._sink_pps_timer_enabled = true;
             cfg->pe._sink_pps_last_time = millis();
         /* Otherwise, stop SinkPPSPeriodicTimer */
@@ -240,25 +235,23 @@ static PT_THREAD(pe_sink_select_cap(struct pt *pt, struct pdb_config *cfg, enum 
     }
 
     /* Get the response message */
-    if (chMBFetchTimeout(&cfg->pe.mailbox, (msg_t *) &cfg->pe._message, TIME_IMMEDIATE) == MSG_OK) {
+    if ((cfg->pe._message = pt_queue_pop(&cfg->pe.mailbox))) {
         /* If the source accepted our request, wait for the new power */
         if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_ACCEPT
                 && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
             /* Transition to Sink Standby if necessary */
-            if (PD_RDO_OBJPOS_GET(cfg->pe._last_dpm_request) != cfg->pe._last_pps) {
+            if (PD_RDO_OBJPOS_GET(&cfg->pe._last_dpm_request) != cfg->pe._last_pps) {
                 cfg->dpm.transition_standby(cfg);
             }
 
             cfg->pe._min_power = false;
 
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkTransitionSink;
             PT_EXIT(pt);
         /* If the message was a Soft_Reset, do the soft reset procedure */
         } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_SOFT_RESET
                 && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkSoftReset;
             PT_EXIT(pt);
@@ -268,7 +261,6 @@ static PT_THREAD(pe_sink_select_cap(struct pt *pt, struct pdb_config *cfg, enum 
                 && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
             /* If we don't have an explicit contract, wait for capabilities */
             if (!cfg->pe._explicit_contract) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkWaitCap;
                 PT_EXIT(pt);
@@ -277,14 +269,11 @@ static PT_THREAD(pe_sink_select_cap(struct pt *pt, struct pdb_config *cfg, enum 
                 /* If we got here from a Wait message, we Should run
                  * SinkRequestTimer in the Ready state. */
                 cfg->pe._min_power = (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_WAIT);
-
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkReady;
                 PT_EXIT(pt);
             }
         } else {
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkSendSoftReset;
             PT_EXIT(pt);
@@ -311,7 +300,7 @@ static PT_THREAD(pe_sink_transition_sink(struct pt *pt, struct pdb_config *cfg, 
     }
 
     /* If we received a message, read it */
-    if (chMBFetchTimeout(&cfg->pe.mailbox, (msg_t *) &cfg->pe._message, TIME_IMMEDIATE) == MSG_OK) {
+    if ((cfg->pe._message = pt_queue_pop(&cfg->pe.mailbox))) {
         /* If we got a PS_RDY, handle it */
         if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_PS_RDY
                 && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
@@ -323,7 +312,6 @@ static PT_THREAD(pe_sink_transition_sink(struct pt *pt, struct pdb_config *cfg, 
                 cfg->dpm.transition_requested(cfg);
             }
 
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkReady;
             PT_EXIT(pt);
@@ -334,7 +322,6 @@ static PT_THREAD(pe_sink_transition_sink(struct pt *pt, struct pdb_config *cfg, 
              */
             cfg->dpm.transition_default(cfg);
 
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkHardReset;
             PT_EXIT(pt);
@@ -389,7 +376,6 @@ static PT_THREAD(pe_sink_ready(struct pt *pt, struct pdb_config *cfg, enum polic
     if (evt & PDB_EVT_PE_NEW_POWER) {
         /* Make sure we're evaluating NULL capabilities to use the old ones */
         if (cfg->pe._message != NULL) {
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
         }
         /* Tell the protocol layer we're starting an AMS */
@@ -415,60 +401,52 @@ static PT_THREAD(pe_sink_ready(struct pt *pt, struct pdb_config *cfg, enum polic
 
     /* If we received a message */
     if (evt & PDB_EVT_PE_MSG_RX) {
-        if (chMBFetchTimeout(&cfg->pe.mailbox, (msg_t *) &cfg->pe._message, TIME_IMMEDIATE) == MSG_OK) {
+        if ((cfg->pe._message = pt_queue_pop(&cfg->pe.mailbox))) {
             /* Ignore vendor-defined messages */
             if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_VENDOR_DEFINED
                     && PD_NUMOBJ_GET(cfg->pe._message) > 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkReady;
                 PT_EXIT(pt);
             /* Ignore Ping messages */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_PING
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkReady;
                 PT_EXIT(pt);
             /* DR_Swap messages are not supported */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_DR_SWAP
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSendNotSupported;
                 PT_EXIT(pt);
             /* Get_Source_Cap messages are not supported */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_GET_SOURCE_CAP
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSendNotSupported;
                 PT_EXIT(pt);
             /* PR_Swap messages are not supported */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_PR_SWAP
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSendNotSupported;
                 PT_EXIT(pt);
             /* VCONN_Swap messages are not supported */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_VCONN_SWAP
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSendNotSupported;
                 PT_EXIT(pt);
             /* Request messages are not supported */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_REQUEST
                     && PD_NUMOBJ_GET(cfg->pe._message) > 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSendNotSupported;
                 PT_EXIT(pt);
             /* Sink_Capabilities messages are not supported */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_SINK_CAPABILITIES
                     && PD_NUMOBJ_GET(cfg->pe._message) > 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSendNotSupported;
                 PT_EXIT(pt);
@@ -481,13 +459,11 @@ static PT_THREAD(pe_sink_ready(struct pt *pt, struct pdb_config *cfg, enum polic
                     cfg->dpm.transition_min(cfg);
                     cfg->pe._min_power = true;
 
-                    chPoolFree(&pdb_msg_pool, cfg->pe._message);
                     cfg->pe._message = NULL;
                     *res = PESinkTransitionSink;
                     PT_EXIT(pt);
                 } else {
                     /* GiveBack is not supported */
-                    chPoolFree(&pdb_msg_pool, cfg->pe._message);
                     cfg->pe._message = NULL;
                     *res = PESinkSendNotSupported;
                     PT_EXIT(pt);
@@ -502,14 +478,12 @@ static PT_THREAD(pe_sink_ready(struct pt *pt, struct pdb_config *cfg, enum polic
             /* Give sink capabilities when asked */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_GET_SINK_CAP
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkGiveSinkCap;
                 PT_EXIT(pt);
             /* If the message was a Soft_Reset, do the soft reset procedure */
             } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_SOFT_RESET
                     && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSoftReset;
                 PT_EXIT(pt);
@@ -519,7 +493,6 @@ static PT_THREAD(pe_sink_ready(struct pt *pt, struct pdb_config *cfg, enum polic
                  * time out. */
                 if ((cfg->pe._message->hdr & PD_HDR_EXT)
                         && (PD_DATA_SIZE_GET(cfg->pe._message) > PD_MAX_EXT_MSG_LEGACY_LEN)) {
-                    chPoolFree(&pdb_msg_pool, cfg->pe._message);
                     cfg->pe._message = NULL;
                     *res = PESinkChunkReceived;
                     PT_EXIT(pt);
@@ -527,13 +500,11 @@ static PT_THREAD(pe_sink_ready(struct pt *pt, struct pdb_config *cfg, enum polic
                  * Not_Supported. */
                 } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_NOT_SUPPORTED
                         && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-                    chPoolFree(&pdb_msg_pool, cfg->pe._message);
                     cfg->pe._message = NULL;
                     *res = PESinkNotSupportedReceived;
                     PT_EXIT(pt);
                 /* If we got an unknown message, send a soft reset */
                 } else {
-                    chPoolFree(&pdb_msg_pool, cfg->pe._message);
                     cfg->pe._message = NULL;
                     *res = PESinkSendSoftReset;
                     PT_EXIT(pt);
@@ -542,7 +513,6 @@ static PT_THREAD(pe_sink_ready(struct pt *pt, struct pdb_config *cfg, enum polic
              *
              * XXX I don't like that this is duplicated. */
             } else {
-                chPoolFree(&pdb_msg_pool, cfg->pe._message);
                 cfg->pe._message = NULL;
                 *res = PESinkSendSoftReset;
                 PT_EXIT(pt);
@@ -558,18 +528,16 @@ static PT_THREAD(pe_sink_get_source_cap(struct pt *pt, struct pdb_config *cfg, e
 {
     PT_BEGIN(pt);
     /* Get a message object */
-    union pd_msg *get_source_cap = chPoolAlloc(&pdb_msg_pool);
+    union pd_msg get_source_cap = {0};
     /* Make a Get_Source_Cap message */
-    get_source_cap->hdr = cfg->pe.hdr_template | PD_MSGTYPE_GET_SOURCE_CAP
+    get_source_cap.hdr = cfg->pe.hdr_template | PD_MSGTYPE_GET_SOURCE_CAP
         | PD_NUMOBJ(0);
     /* Transmit the Get_Source_Cap */
-    chMBPostTimeout(&cfg->prl.tx_mailbox, (msg_t) get_source_cap, TIME_IMMEDIATE);
+    pt_queue_push(&cfg->prl.tx_mailbox, get_source_cap);
     cfg->prl.tx_events |= PDB_EVT_PRLTX_MSG_TX;
     static uint32_t evt;
     PT_EVT_WAIT(pt, &cfg->pe.events, PDB_EVT_PE_TX_DONE | PDB_EVT_PE_TX_ERR | PDB_EVT_PE_RESET, &evt);
-    /* Free the sent message */
-    chPoolFree(&pdb_msg_pool, get_source_cap);
-    get_source_cap = NULL;
+
     /* If we got reset signaling, transition to default */
     if (evt & PDB_EVT_PE_RESET) {
         *res = PESinkTransitionDefault;
@@ -589,19 +557,15 @@ static PT_THREAD(pe_sink_give_sink_cap(struct pt *pt, struct pdb_config *cfg, en
 {
     PT_BEGIN(pt);
     /* Get a message object */
-    union pd_msg *snk_cap = chPoolAlloc(&pdb_msg_pool);
+    union pd_msg snk_cap = {0};
     /* Get our capabilities from the DPM */
-    cfg->dpm.get_sink_capability(cfg, snk_cap);
+    cfg->dpm.get_sink_capability(cfg, &snk_cap);
 
     /* Transmit our capabilities */
-    chMBPostTimeout(&cfg->prl.tx_mailbox, (msg_t) snk_cap, TIME_IMMEDIATE);
+    pt_queue_push(&cfg->prl.tx_mailbox, snk_cap);
     cfg->prl.tx_events |= PDB_EVT_PRLTX_MSG_TX;
     static uint32_t evt;
     PT_EVT_WAIT(pt, &cfg->pe.events, PDB_EVT_PE_TX_DONE | PDB_EVT_PE_TX_ERR | PDB_EVT_PE_RESET, &evt);
-
-    /* Free the Sink_Capabilities message */
-    chPoolFree(&pdb_msg_pool, snk_cap);
-    snk_cap = NULL;
 
     /* If we got reset signaling, transition to default */
     if (evt & PDB_EVT_PE_RESET) {
@@ -666,17 +630,15 @@ static PT_THREAD(pe_sink_soft_reset(struct pt *pt, struct pdb_config *cfg, enum 
      * when a Soft_Reset message is received. */
 
     /* Get a message object */
-    union pd_msg *accept = chPoolAlloc(&pdb_msg_pool);
+    union pd_msg accept = {0};
     /* Make an Accept message */
-    accept->hdr = cfg->pe.hdr_template | PD_MSGTYPE_ACCEPT | PD_NUMOBJ(0);
+    accept.hdr = cfg->pe.hdr_template | PD_MSGTYPE_ACCEPT | PD_NUMOBJ(0);
     /* Transmit the Accept */
-    chMBPostTimeout(&cfg->prl.tx_mailbox, (msg_t) accept, TIME_IMMEDIATE);
+    pt_queue_push(&cfg->prl.tx_mailbox, accept);
     cfg->prl.tx_events |= PDB_EVT_PRLTX_MSG_TX;
     static uint32_t evt;
     PT_EVT_WAIT(pt, &cfg->pe.events, PDB_EVT_PE_TX_DONE | PDB_EVT_PE_TX_ERR | PDB_EVT_PE_RESET, &evt);
-    /* Free the sent message */
-    chPoolFree(&pdb_msg_pool, accept);
-    accept = NULL;
+
     /* If we got reset signaling, transition to default */
     if (evt & PDB_EVT_PE_RESET) {
         *res = PESinkTransitionDefault;
@@ -699,17 +661,15 @@ static PT_THREAD(pe_sink_send_soft_reset(struct pt *pt, struct pdb_config *cfg, 
      * just before a Soft_Reset message is transmitted. */
 
     /* Get a message object */
-    union pd_msg *softrst = chPoolAlloc(&pdb_msg_pool);
+    union pd_msg softrst = {0};
     /* Make a Soft_Reset message */
-    softrst->hdr = cfg->pe.hdr_template | PD_MSGTYPE_SOFT_RESET | PD_NUMOBJ(0);
+    softrst.hdr = cfg->pe.hdr_template | PD_MSGTYPE_SOFT_RESET | PD_NUMOBJ(0);
     /* Transmit the soft reset */
-    chMBPostTimeout(&cfg->prl.tx_mailbox, (msg_t) softrst, TIME_IMMEDIATE);
+    pt_queue_push(&cfg->prl.tx_mailbox, softrst);
     cfg->prl.tx_events |= PDB_EVT_PRLTX_MSG_TX;
     static uint32_t evt;
     PT_EVT_WAIT(pt, &cfg->pe.events, PDB_EVT_PE_TX_DONE | PDB_EVT_PE_TX_ERR | PDB_EVT_PE_RESET, &evt);
-    /* Free the sent message */
-    chPoolFree(&pdb_msg_pool, softrst);
-    softrst = NULL;
+
     /* If we got reset signaling, transition to default */
     if (evt & PDB_EVT_PE_RESET) {
         *res = PESinkTransitionDefault;
@@ -735,24 +695,21 @@ static PT_THREAD(pe_sink_send_soft_reset(struct pt *pt, struct pdb_config *cfg, 
     }
 
     /* Get the response message */
-    if (chMBFetchTimeout(&cfg->pe.mailbox, (msg_t *) &cfg->pe._message, TIME_IMMEDIATE) == MSG_OK) {
+    if ((cfg->pe._message = pt_queue_pop(&cfg->pe.mailbox))) {
         /* If the source accepted our soft reset, wait for capabilities. */
         if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_ACCEPT
                 && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkWaitCap;
             PT_EXIT(pt);
         /* If the message was a Soft_Reset, do the soft reset procedure */
         } else if (PD_MSGTYPE_GET(cfg->pe._message) == PD_MSGTYPE_SOFT_RESET
                 && PD_NUMOBJ_GET(cfg->pe._message) == 0) {
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkSoftReset;
             PT_EXIT(pt);
         /* Otherwise, send a hard reset */
         } else {
-            chPoolFree(&pdb_msg_pool, cfg->pe._message);
             cfg->pe._message = NULL;
             *res = PESinkHardReset;
             PT_EXIT(pt);
@@ -766,25 +723,21 @@ static PT_THREAD(pe_sink_send_not_supported(struct pt *pt, struct pdb_config *cf
 {
     PT_BEGIN(pt);
     /* Get a message object */
-    union pd_msg *not_supported = chPoolAlloc(&pdb_msg_pool);
+    union pd_msg not_supported = {};
 
     if ((cfg->pe.hdr_template & PD_HDR_SPECREV) == PD_SPECREV_2_0) {
         /* Make a Reject message */
-        not_supported->hdr = cfg->pe.hdr_template | PD_MSGTYPE_REJECT | PD_NUMOBJ(0);
+        not_supported.hdr = cfg->pe.hdr_template | PD_MSGTYPE_REJECT | PD_NUMOBJ(0);
     } else if ((cfg->pe.hdr_template & PD_HDR_SPECREV) == PD_SPECREV_3_0) {
         /* Make a Not_Supported message */
-        not_supported->hdr = cfg->pe.hdr_template | PD_MSGTYPE_NOT_SUPPORTED | PD_NUMOBJ(0);
+        not_supported.hdr = cfg->pe.hdr_template | PD_MSGTYPE_NOT_SUPPORTED | PD_NUMOBJ(0);
     }
 
     /* Transmit the message */
-    chMBPostTimeout(&cfg->prl.tx_mailbox, (msg_t) not_supported, TIME_IMMEDIATE);
+    pt_queue_push(&cfg->prl.tx_mailbox, not_supported);
     cfg->prl.tx_events |= PDB_EVT_PRLTX_MSG_TX;
     static uint32_t evt;
     PT_EVT_WAIT(pt, &cfg->pe.events, PDB_EVT_PE_TX_DONE | PDB_EVT_PE_TX_ERR | PDB_EVT_PE_RESET, &evt);
-
-    /* Free the message */
-    chPoolFree(&pdb_msg_pool, not_supported);
-    not_supported = NULL;
 
     /* If we got reset signaling, transition to default */
     if (evt & PDB_EVT_PE_RESET) {
@@ -871,7 +824,8 @@ static PT_THREAD(PolicyEngine(struct pt *pt, struct pdb_config *cfg))
     static struct pt child;
 
     /* Initialize the mailbox */
-    chMBObjectInit(&cfg->pe.mailbox, cfg->pe._mailbox_queue, PDB_MSG_POOL_SIZE);
+    cfg->pe.mailbox.r = 0;
+    cfg->pe.mailbox.w = 0;
     /* Initialize the timebase for SinkPPSPeriodicTimer */
     cfg->pe._sink_pps_last_time = 0;
     cfg->pe._sink_pps_timer_enabled = false;

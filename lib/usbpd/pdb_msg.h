@@ -18,6 +18,8 @@
 #ifndef PDB_MSG_H
 #define PDB_MSG_H
 
+#include "pt-queue.h"
+
 #include <stdint.h>
 
 /*
@@ -48,9 +50,11 @@ union pd_msg {
     } __attribute__((packed));
 };
 
+const extern union pd_msg pd_msg_empty;
+
 /*
- * The pool of messages used by the library
+ * Queue type for inter-thread messaging
  */
-extern void *pdb_msg_pool;
+typedef pt_queue(union pd_msg, 4) pd_msg_queue_t;
 
 #endif /* PDB_MSG_H */
