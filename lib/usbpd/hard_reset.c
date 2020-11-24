@@ -100,7 +100,7 @@ static PT_THREAD(hardrst_wait_phy(struct pt *pt, struct pdb_config *cfg, enum ha
     (void) cfg;
     /* Wait for the PHY to tell us that it's done sending the hard reset */
     static uint32_t evt;
-    PT_EVT_WAIT_TO(pt, &cfg->pe.events, PDB_EVT_HARDRST_I_HARDSENT, PD_T_HARD_RESET_COMPLETE, &evt);
+    PT_EVT_WAIT_TO(pt, &cfg->prl.hardrst_events, PDB_EVT_HARDRST_I_HARDSENT, PD_T_HARD_RESET_COMPLETE, &evt);
     cfg->pe.events |= PDB_EVT_PE_RESET;
 
     /* Move on no matter what made us stop waiting. */
@@ -124,7 +124,7 @@ static PT_THREAD(hardrst_wait_pe(struct pt *pt, struct pdb_config *cfg, enum har
     (void) cfg;
     /* Wait for the PE to tell us that it's done */
     static uint32_t evt;
-    PT_EVT_WAIT(pt, &cfg->pe.events, PDB_EVT_HARDRST_DONE, &evt);
+    PT_EVT_WAIT(pt, &cfg->prl.hardrst_events, PDB_EVT_HARDRST_DONE, &evt);
 
     *res = PRLHRComplete;
     PT_END(pt);

@@ -32,14 +32,17 @@ void pdb_init(struct pdb_config *cfg)
 
 void pdb_poll(struct pdb_config *cfg)
 {
+    /* Schedule the INT_N thread. */
+    pdb_int_n_run(cfg);
+
+    /* Schedule RX before PE. */
+    pdb_prlrx_run(cfg);
+
     /* Schedule the policy engine thread. */
     pdb_pe_run(cfg);
 
-    /* Schedule the protocol layer threads. */
-    pdb_prlrx_run(cfg);
+    /* Schedule TX after PE. */
     pdb_prltx_run(cfg);
-    pdb_hardrst_run(cfg);
 
-    /* Schedule the INT_N thread. */
-    pdb_int_n_run(cfg);
+    pdb_hardrst_run(cfg);
 }

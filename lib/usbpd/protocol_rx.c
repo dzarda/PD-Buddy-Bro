@@ -49,7 +49,7 @@ static PT_THREAD(protocol_rx_wait_phy(struct pt *pt, struct pdb_config *cfg, enu
     PT_BEGIN(pt);
     /* Wait for an event */
     static uint32_t evt;
-    PT_EVT_WAIT(pt, &cfg->pe.events, UINT32_MAX, &evt);
+    PT_EVT_WAIT(pt, &cfg->prl.rx_events, UINT32_MAX, &evt);
 
     /* If we got a reset event, reset */
     if (evt & PDB_EVT_PRLRX_RESET) {
@@ -186,6 +186,7 @@ static PT_THREAD(ProtocolRX(struct pt *pt, struct pdb_config *cfg))
                 /* This is an error.  It really shouldn't happen.  We might
                  * want to handle it anyway, though. */
                 break;
+
         }
     }
     PT_END(pt);

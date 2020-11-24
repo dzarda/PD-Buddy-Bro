@@ -76,6 +76,7 @@ static PT_THREAD(IntNPoll(struct pt *pt, struct pdb_config *cfg))
             }
 
         }
+        PT_YIELD(pt);
     }
     PT_END(pt);
 }

@@ -28,7 +28,6 @@
 #include "pt.h"
 #include "pt-evt.h"
 
-
 enum policy_engine_state {
     PESinkStartup,
     PESinkDiscovery,
@@ -79,13 +78,15 @@ static PT_THREAD(pe_sink_discovery(struct pt *pt, struct pdb_config *cfg, enum p
     *res = PESinkWaitCap;
     PT_END(pt);
 }
+
 static PT_THREAD(pe_sink_wait_cap(struct pt *pt, struct pdb_config *cfg, enum policy_engine_state *res))
 {
     PT_BEGIN(pt);
     /* Fetch a message from the protocol layer */
     static uint32_t evt;
     PT_EVT_WAIT_TO(pt, &cfg->pe.events,
-            PDB_EVT_PE_MSG_RX| PDB_EVT_PE_I_OVRTEMP | PDB_EVT_PE_RESET, PD_T_TYPEC_SINK_WAIT_CAP, &evt);
+            PDB_EVT_PE_MSG_RX | PDB_EVT_PE_I_OVRTEMP | PDB_EVT_PE_RESET, PD_T_TYPEC_SINK_WAIT_CAP, &evt);
+
     /* If we timed out waiting for Source_Capabilities, send a hard reset */
     if (evt == 0) {
         *res = PESinkHardReset;
@@ -131,7 +132,7 @@ static PT_THREAD(pe_sink_wait_cap(struct pt *pt, struct pdb_config *cfg, enum po
                 PT_EXIT(pt);
             /* If we got an unexpected message, reset */
             } else {
-                /* Free the received message */
+                cfg->pe._message = NULL;
                 *res = PESinkHardReset;
                 PT_EXIT(pt);
             }
@@ -165,7 +166,6 @@ static PT_THREAD(pe_sink_eval_cap(struct pt *pt, struct pdb_config *cfg, enum po
          * same PPS APDO */
         cfg->pe._last_pps = 8;
     }
-    /* Get a message object for the request if we don't have one already */
 
     /* Remember the last PDO we requested if it was a PPS APDO */
     if (PD_RDO_OBJPOS_GET(&cfg->pe._last_dpm_request) >= cfg->pe._pps_index) {
@@ -295,7 +295,6 @@ static PT_THREAD(pe_sink_transition_sink(struct pt *pt, struct pdb_config *cfg, 
     }
     /* If no message was received, send a hard reset */
     if (evt == 0) {
-        *res = PESinkHardReset;
         PT_EXIT(pt);
     }
 
@@ -897,6 +896,7 @@ static PT_THREAD(PolicyEngine(struct pt *pt, struct pdb_config *cfg))
                 state = PESinkStartup;
                 break;
         }
+        PT_YIELD(pt);
     }
     PT_END(pt);
 }
