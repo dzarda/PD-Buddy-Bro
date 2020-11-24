@@ -14,14 +14,14 @@ inline unsigned pt_evt_getandclear(uint32_t *events, uint32_t mask) {
 
 #define PT_EVT_WAIT(pt, events, mask, result)                                                      \
     do {                                                                                           \
-        PT_WAIT_UNTIL(pt, *result = (*events & (mask)));                                           \
-        *events &= ~mask;                                                                          \
+        PT_WAIT_UNTIL(pt, ((*result) = ((*events) & (mask))));                                     \
+        (*events) &= ~(mask);                                                                      \
     } while (0)
 
 #define PT_EVT_WAIT_TO(pt, events, mask, timeout, result)                                          \
     do {                                                                                           \
         static unsigned _start;                                                                    \
         _start = millis();                                                                         \
-        PT_WAIT_UNTIL(pt, *result = (*events & (mask)) || (millis() - _start > timeout));          \
-        *events &= ~mask;                                                                          \
+        PT_WAIT_UNTIL(pt, (((*result) = ((*events) & (mask))) || (millis() - _start > timeout)));  \
+        (*events) &= ~(mask);                                                                      \
     } while (0)
