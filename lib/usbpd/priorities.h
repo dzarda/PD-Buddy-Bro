@@ -18,13 +18,9 @@
 #ifndef PDB_PRIORITIES_H
 #define PDB_PRIORITIES_H
 
-
-#include <ch.h>
-
 /* PD Buddy thread priorities */
-#define PDB_PRIO_PE (NORMALPRIO - 1)
+#define PDB_PRIO_PE (10 - 1)
 #define PDB_PRIO_PRL (PDB_PRIO_PE - 1)
 #define PDB_PRIO_PRL_INT_N (PDB_PRIO_PRL - 1)
-
 
 #endif /* PDB_PRIORITIES_H */

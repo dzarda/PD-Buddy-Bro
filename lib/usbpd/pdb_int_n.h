@@ -18,19 +18,17 @@
 #ifndef PDB_INT_N_H
 #define PDB_INT_N_H
 
-#include <ch.h>
-
 #include "pdb_conf.h"
 
+#include "pt.h"
 
 /*
  * Structure for the INT_N thread
  */
 struct pdb_int_n {
-    /* INT_N thread and working area */
-    THD_WORKING_AREA(_wa, PDB_INT_N_WA_SIZE);
-    thread_t *thread;
+    /* INT_N thread and event variable */
+    struct pt thread;
+    uint32_t events;
 };
-
 
 #endif /* PDB_INT_N_H */

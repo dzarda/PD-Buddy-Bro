@@ -25,6 +25,8 @@
 #include "protocol_tx.h"
 #include "fusb302b.h"
 
+#include "pt.h"
+#include "pt-evt.h"
 
 /*
  * Protocol RX machine states
@@ -42,14 +44,18 @@ enum protocol_rx_state {
 /*
  * PRL_Rx_Wait_for_PHY_Message state
  */
-static enum protocol_rx_state protocol_rx_wait_phy(struct pdb_config *cfg)
+
+static PT_THREAD(protocol_rx_wait_phy(struct pt *pt, struct pdb_config *cfg, enum protocol_rx_state *res))
 {
+    PT_BEGIN(pt);
     /* Wait for an event */
-    eventmask_t evt = chEvtWaitAny(ALL_EVENTS);
+    static uint32_t evt;
+    PT_EVT_WAIT(pt, &cfg->pe.events, UINT32_MAX, &evt);
 
     /* If we got a reset event, reset */
     if (evt & PDB_EVT_PRLRX_RESET) {
-        return PRLRxWaitPHY;
+        *res = PRLRxWaitPHY;
+        PT_EXIT(pt);
     }
     /* If we got an I_GCRCSENT event, read the message and decide what to do */
     if (evt & PDB_EVT_PRLRX_I_GCRCSENT) {
@@ -61,22 +67,26 @@ static enum protocol_rx_state protocol_rx_wait_phy(struct pdb_config *cfg)
         /* If it's a Soft_Reset, go to the soft reset state */
         if (PD_MSGTYPE_GET(cfg->prl._rx_message) == PD_MSGTYPE_SOFT_RESET
                 && PD_NUMOBJ_GET(cfg->prl._rx_message) == 0) {
-            return PRLRxReset;
+            *res = PRLRxReset;
+            PT_EXIT(pt);
         /* Otherwise, check the message ID */
         } else {
-            return PRLRxCheckMessageID;
+            *res = PRLRxCheckMessageID;
+            PT_EXIT(pt);
         }
     }
 
     /* We shouldn't ever get here.  This just silence the compiler warning. */
-    return PRLRxWaitPHY;
+    *res = PRLRxWaitPHY;
+    PT_END(pt);
 }
 
 /*
  * PRL_Rx_Layer_Reset_for_Receive state
  */
-static enum protocol_rx_state protocol_rx_reset(struct pdb_config *cfg)
+static PT_THREAD(protocol_rx_reset(struct pt *pt, struct pdb_config *cfg, enum protocol_rx_state *res))
 {
+    PT_BEGIN(pt);
     /* Reset MessageIDCounter */
     cfg->prl._tx_messageidcounter = 0;
 
@@ -84,30 +94,34 @@ static enum protocol_rx_state protocol_rx_reset(struct pdb_config *cfg)
     cfg->prl._rx_messageid = -1;
 
     /* TX transitions to its reset state */
-    chEvtSignal(cfg->prl.tx_thread, PDB_EVT_PRLTX_RESET);
-    chThdYield();
+    cfg->prl.tx_events |= PDB_EVT_PRLTX_RESET;
+    PT_YIELD(pt);
 
     /* If we got a RESET signal, reset the machine */
-    if (chEvtGetAndClearEvents(PDB_EVT_PRLRX_RESET) != 0) {
+    if (PT_EVT_GETANDCLEAR(&cfg->prl.rx_events, PDB_EVT_PRLRX_RESET) != 0) {
         chPoolFree(&pdb_msg_pool, cfg->prl._rx_message);
         cfg->prl._rx_message = NULL;
-        return PRLRxWaitPHY;
+        *res = PRLRxWaitPHY;
+        PT_EXIT(pt);
     }
 
     /* Go to the Check_MessageID state */
-    return PRLRxCheckMessageID;
+    *res = PRLRxCheckMessageID;
+    PT_END(pt);
 }
 
 /*
  * PRL_Rx_Check_MessageID state
  */
-static enum protocol_rx_state protocol_rx_check_messageid(struct pdb_config *cfg)
+static PT_THREAD(protocol_rx_check_messageid(struct pt *pt, struct pdb_config *cfg, enum protocol_rx_state *res))
 {
+    PT_BEGIN(pt);
     /* If we got a RESET signal, reset the machine */
-    if (chEvtGetAndClearEvents(PDB_EVT_PRLRX_RESET) != 0) {
+    if (PT_EVT_GETANDCLEAR(&cfg->prl.rx_events, PDB_EVT_PRLRX_RESET) != 0) {
         chPoolFree(&pdb_msg_pool, cfg->prl._rx_message);
         cfg->prl._rx_message = NULL;
-        return PRLRxWaitPHY;
+        *res = PRLRxWaitPHY;
+        PT_EXIT(pt);
     }
 
     /* If the message has the stored ID, we've seen this message before.  Free
@@ -115,54 +129,62 @@ static enum protocol_rx_state protocol_rx_check_messageid(struct pdb_config *cfg
     if (PD_MESSAGEID_GET(cfg->prl._rx_message) == cfg->prl._rx_messageid) {
         chPoolFree(&pdb_msg_pool, cfg->prl._rx_message);
         cfg->prl._rx_message = NULL;
-        return PRLRxWaitPHY;
+        *res = PRLRxWaitPHY;
+        PT_EXIT(pt);
     /* Otherwise, there's either no stored ID or this message has an ID we
      * haven't just seen.  Transition to the Store_MessageID state. */
     } else {
-        return PRLRxStoreMessageID;
+        *res = PRLRxStoreMessageID;
+        PT_EXIT(pt);
     }
+    PT_END(pt);
 }
 
 /*
  * PRL_Rx_Store_MessageID state
  */
-static enum protocol_rx_state protocol_rx_store_messageid(struct pdb_config *cfg)
+static PT_THREAD(protocol_rx_store_messageid(struct pt *pt, struct pdb_config *cfg, enum protocol_rx_state *res))
 {
+    PT_BEGIN(pt);
     /* Tell ProtocolTX to discard the message being transmitted */
-    chEvtSignal(cfg->prl.tx_thread, PDB_EVT_PRLTX_DISCARD);
-    chThdYield();
+    cfg->prl.tx_events |= PDB_EVT_PRLTX_DISCARD;
+    PT_YIELD(pt);
 
     /* Update the stored MessageID */
     cfg->prl._rx_messageid = PD_MESSAGEID_GET(cfg->prl._rx_message);
 
     /* Pass the message to the policy engine. */
     chMBPostTimeout(&cfg->pe.mailbox, (msg_t) cfg->prl._rx_message, TIME_IMMEDIATE);
-    chEvtSignal(cfg->pe.thread, PDB_EVT_PE_MSG_RX);
+    cfg->pe.events |= PDB_EVT_PE_MSG_RX;
 
     /* Don't check if we got a RESET because we'd do nothing different. */
 
-    return PRLRxWaitPHY;
+    *res = PRLRxWaitPHY;
+    PT_END(pt);
 }
 
 /*
  * Protocol layer RX state machine thread
  */
-static THD_FUNCTION(ProtocolRX, cfg) {
-    enum protocol_rx_state state = PRLRxWaitPHY;
+static PT_THREAD(ProtocolRX(struct pt *pt, struct pdb_config *cfg))
+{
+    PT_BEGIN(pt);
+    static enum protocol_rx_state state = PRLRxWaitPHY;
+    static struct pt child;
 
     while (true) {
         switch (state) {
             case PRLRxWaitPHY:
-                state = protocol_rx_wait_phy(cfg);
+                PT_SPAWN(pt, &child, protocol_rx_wait_phy(&child, cfg, &state));
                 break;
             case PRLRxReset:
-                state = protocol_rx_reset(cfg);
+                PT_SPAWN(pt, &child, protocol_rx_reset(&child, cfg, &state));
                 break;
             case PRLRxCheckMessageID:
-                state = protocol_rx_check_messageid(cfg);
+                PT_SPAWN(pt, &child, protocol_rx_check_messageid(&child, cfg, &state));
                 break;
             case PRLRxStoreMessageID:
-                state = protocol_rx_store_messageid(cfg);
+                PT_SPAWN(pt, &child, protocol_rx_store_messageid(&child, cfg, &state));
                 break;
             default:
                 /* This is an error.  It really shouldn't happen.  We might
@@ -170,12 +192,10 @@ static THD_FUNCTION(ProtocolRX, cfg) {
                 break;
         }
     }
+    PT_END(pt);
 }
 
 void pdb_prlrx_run(struct pdb_config *cfg)
 {
-    cfg->prl._rx_messageid = -1;
-
-    cfg->prl.rx_thread = chThdCreateStatic(cfg->prl._rx_wa,
-            sizeof(cfg->prl._rx_wa), PDB_PRIO_PRL, ProtocolRX, cfg);
+    (void)PT_SCHEDULE(ProtocolRX(&cfg->prl.rx_thread, cfg));
 }

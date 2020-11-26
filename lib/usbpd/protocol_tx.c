@@ -23,6 +23,9 @@
 #include "protocol_rx.h"
 #include "fusb302b.h"
 
+#include "pt.h"
+#include "pt-evt.h"
+
 
 /*
  * Protocol TX machine states
@@ -47,8 +50,9 @@ enum protocol_tx_state {
 /*
  * PRL_Tx_PHY_Layer_Reset state
  */
-static enum protocol_tx_state protocol_tx_phy_reset(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_phy_reset(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     /* Reset the PHY */
     fusb_reset(&cfg->fusb);
 
@@ -56,29 +60,33 @@ static enum protocol_tx_state protocol_tx_phy_reset(struct pdb_config *cfg)
      * we failed to send it */
     if (cfg->prl._tx_message != NULL) {
         /* Tell the policy engine that we failed */
-        chEvtSignal(cfg->pe.thread, PDB_EVT_PE_TX_ERR);
+        cfg->pe.events |= PDB_EVT_PE_TX_ERR;
         /* Finish failing to send the message */
         cfg->prl._tx_message = NULL;
     }
 
     /* Wait for a message request */
-    return PRLTxWaitMessage;
+    *res = PRLTxWaitMessage;
+    PT_END(pt);
 }
 
 /*
  * PRL_Tx_Wait_for_Message_Request state
  */
-static enum protocol_tx_state protocol_tx_wait_message(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_wait_message(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     /* Wait for an event */
-    eventmask_t evt = chEvtWaitAny(PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD
-            | PDB_EVT_PRLTX_MSG_TX);
+    static uint32_t evt;
+    PT_EVT_WAIT(pt, &cfg->prl.tx, PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD | PDB_EVT_PRLTX_MSG_TX);
 
     if (evt & PDB_EVT_PRLTX_RESET) {
-        return PRLTxPHYReset;
+        *res = PRLTxPHYReset;
+        PT_EXIT(pt);
     }
     if (evt & PDB_EVT_PRLTX_DISCARD) {
-        return PRLTxDiscardMessage;
+        *res = PRLTxDiscardMessage;
+        PT_EXIT(pt);
     }
 
     /* If the policy engine is trying to send a message */
@@ -88,42 +96,51 @@ static enum protocol_tx_state protocol_tx_wait_message(struct pdb_config *cfg)
         /* If it's a Soft_Reset, reset the TX layer first */
         if (PD_MSGTYPE_GET(cfg->prl._tx_message) == PD_MSGTYPE_SOFT_RESET
                 && PD_NUMOBJ_GET(cfg->prl._tx_message) == 0) {
-            return PRLTxReset;
+            *res = PRLTxReset;
+        PT_EXIT(pt);
         /* Otherwise, just send the message */
         } else {
-            return PRLTxConstructMessage;
+            *res = PRLTxConstructMessage;
+        PT_EXIT(pt);
         }
     }
 
     /* Silence the compiler warning */
-    return PRLTxDiscardMessage;
+    *res = PRLTxDiscardMessage;
+    PT_END(pt);
 }
 
-static enum protocol_tx_state protocol_tx_reset(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_reset(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     /* Clear MessageIDCounter */
     cfg->prl._tx_messageidcounter = 0;
 
     /* Tell the Protocol RX thread to reset */
-    chEvtSignal(cfg->prl.rx_thread, PDB_EVT_PRLRX_RESET);
-    chThdYield();
+    cfg->prl.rx_events |= PDB_EVT_PRLRX_RESET;
+    PT_YIELD(pt);
 
-    return PRLTxConstructMessage;
+    *res = PRLTxConstructMessage;
+    PT_END(pt);
 }
 
 /*
  * PRL_Tx_Construct_Message state
  */
-static enum protocol_tx_state protocol_tx_construct_message(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_construct_message(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     /* Make sure nobody wants us to reset */
-    eventmask_t evt = chEvtGetAndClearEvents(PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD);
+    static uint32_t evt;
+    evt = PT_EVT_GETANDCLEAR(&cfg->prl.tx_events, PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD);
 
     if (evt & PDB_EVT_PRLTX_RESET) {
-        return PRLTxPHYReset;
+        *res = PRLTxPHYReset;
+        PT_EXIT(pt);
     }
     if (evt & PDB_EVT_PRLTX_DISCARD) {
-        return PRLTxDiscardMessage;
+        *res = PRLTxDiscardMessage;
+        PT_EXIT(pt);
     }
 
     /* Set the correct MessageID in the message */
@@ -133,10 +150,10 @@ static enum protocol_tx_state protocol_tx_construct_message(struct pdb_config *c
     /* PD 3.0 collision avoidance */
     if ((cfg->pe.hdr_template & PD_HDR_SPECREV) == PD_SPECREV_3_0) {
         /* If we're starting an AMS, wait for permission to transmit */
-        evt = chEvtGetAndClearEvents(PDB_EVT_PRLTX_START_AMS);
+        evt = PT_EVT_GETANDCLEAR(&cfg->prl.tx_events, PDB_EVT_PRLTX_START_AMS);
         if (evt & PDB_EVT_PRLTX_START_AMS) {
             while (fusb_get_typec_current(&cfg->fusb) != fusb_sink_tx_ok) {
-                chThdSleepMilliseconds(1);
+                PT_YIELD(pt);
             }
         }
     }
@@ -144,45 +161,54 @@ static enum protocol_tx_state protocol_tx_construct_message(struct pdb_config *c
     /* Send the message to the PHY */
     fusb_send_message(&cfg->fusb, cfg->prl._tx_message);
 
-    return PRLTxWaitResponse;
+    *res = PRLTxWaitResponse;
+    PT_END(pt);
 }
 
 /*
  * PRL_Tx_Wait_for_PHY_Response state
  */
-static enum protocol_tx_state protocol_tx_wait_response(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_wait_response(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     (void) cfg;
     /* Wait for an event.  There is no need to run CRCReceiveTimer, since the
      * FUSB302B handles that as part of its retry mechanism. */
-    eventmask_t evt = chEvtWaitAny(PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD
-            | PDB_EVT_PRLTX_I_TXSENT | PDB_EVT_PRLTX_I_RETRYFAIL);
+    static uint32_t evt;
+    PT_EVT_WAIT(pt, &cfg->prl.tx_events, PDB_EVT_PRLTX_RESET | PDB_EVT_PRLTX_DISCARD
+            | PDB_EVT_PRLTX_I_TXSENT | PDB_EVT_PRLTX_I_RETRYFAIL, &evt);
 
     if (evt & PDB_EVT_PRLTX_RESET) {
-        return PRLTxPHYReset;
+        *res = PRLTxPHYReset;
+        PT_EXIT(pt);
     }
     if (evt & PDB_EVT_PRLTX_DISCARD) {
-        return PRLTxDiscardMessage;
+        *res = PRLTxDiscardMessage;
+        PT_EXIT(pt);
     }
 
     /* If the message was sent successfully */
     if (evt & PDB_EVT_PRLTX_I_TXSENT) {
-        return PRLTxMatchMessageID;
+        *res = PRLTxMatchMessageID;
+        PT_EXIT(pt);
     }
     /* If the message failed to be sent */
     if (evt & PDB_EVT_PRLTX_I_RETRYFAIL) {
-        return PRLTxTransmissionError;
+        *res = PRLTxTransmissionError;
+        PT_EXIT(pt);
     }
 
     /* Silence the compiler warning */
-    return PRLTxDiscardMessage;
+    *res = PRLTxDiscardMessage;
+    PT_END(pt);
 }
 
 /*
  * PRL_Tx_Match_MessageID state
  */
-static enum protocol_tx_state protocol_tx_match_messageid(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_match_messageid(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     union pd_msg goodcrc;
 
     /* Read the GoodCRC */
@@ -192,53 +218,63 @@ static enum protocol_tx_state protocol_tx_match_messageid(struct pdb_config *cfg
     if (PD_MSGTYPE_GET(&goodcrc) == PD_MSGTYPE_GOODCRC
             && PD_NUMOBJ_GET(&goodcrc) == 0
             && PD_MESSAGEID_GET(&goodcrc) == cfg->prl._tx_messageidcounter) {
-        return PRLTxMessageSent;
+        *res = PRLTxMessageSent;
+        PT_EXIT(pt);
     } else {
-        return PRLTxTransmissionError;
+        *res = PRLTxTransmissionError;
+        PT_EXIT(pt);
     }
+    PT_END(pt);
 }
 
-static enum protocol_tx_state protocol_tx_transmission_error(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_transmission_error(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     /* Increment MessageIDCounter */
     cfg->prl._tx_messageidcounter = (cfg->prl._tx_messageidcounter + 1) % 8;
 
     /* Tell the policy engine that we failed */
-    chEvtSignal(cfg->pe.thread, PDB_EVT_PE_TX_ERR);
+    cfg->pe.events |= PDB_EVT_PE_TX_ERR;
 
     cfg->prl._tx_message = NULL;
-    return PRLTxWaitMessage;
+    *res = PRLTxWaitMessage;
+    PT_END(pt);
 }
 
-static enum protocol_tx_state protocol_tx_message_sent(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_message_sent(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     /* Increment MessageIDCounter */
     cfg->prl._tx_messageidcounter = (cfg->prl._tx_messageidcounter + 1) % 8;
 
     /* Tell the policy engine that we succeeded */
-    chEvtSignal(cfg->pe.thread, PDB_EVT_PE_TX_DONE);
+    cfg->pe.events |= PDB_EVT_PE_TX_DONE;
 
     cfg->prl._tx_message = NULL;
-    return PRLTxWaitMessage;
+    *res = PRLTxWaitMessage;
+    PT_END(pt);
 }
 
-static enum protocol_tx_state protocol_tx_discard_message(struct pdb_config *cfg)
+static PT_THREAD(protocol_tx_discard_message(struct pt *pt, struct pdb_config *cfg, enum protocol_tx_state *res))
 {
+    PT_BEGIN(pt);
     /* If we were working on sending a message, increment MessageIDCounter */
     if (cfg->prl._tx_message != NULL) {
         cfg->prl._tx_messageidcounter = (cfg->prl._tx_messageidcounter + 1) % 8;
     }
 
-    return PRLTxPHYReset;
+    *res = PRLTxPHYReset;
+    PT_END(pt);
 }
 
 /*
  * Protocol layer TX state machine thread
  */
-static THD_FUNCTION(ProtocolTX, vcfg) {
-    struct pdb_config *cfg = vcfg;
-
-    enum protocol_tx_state state = PRLTxPHYReset;
+static PT_THREAD(ProtocolTX(struct pt *pt, struct pdb_config *cfg))
+{
+    PT_BEGIN(pt);
+    static enum protocol_tx_state state = PRLTxPHYReset;
+    static struct pt child;
 
     /* Initialize the mailbox */
     chMBObjectInit(&cfg->prl.tx_mailbox, cfg->prl._tx_mailbox_queue, PDB_MSG_POOL_SIZE);
@@ -246,31 +282,31 @@ static THD_FUNCTION(ProtocolTX, vcfg) {
     while (true) {
         switch (state) {
             case PRLTxPHYReset:
-                state = protocol_tx_phy_reset(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_phy_reset(&child, cfg, &state));
                 break;
             case PRLTxWaitMessage:
-                state = protocol_tx_wait_message(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_wait_message(&child, cfg, &state));
                 break;
             case PRLTxReset:
-                state = protocol_tx_reset(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_reset(&child, cfg, &state));
                 break;
             case PRLTxConstructMessage:
-                state = protocol_tx_construct_message(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_construct_message(&child, cfg, &state));
                 break;
             case PRLTxWaitResponse:
-                state = protocol_tx_wait_response(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_wait_response(&child, cfg, &state));
                 break;
             case PRLTxMatchMessageID:
-                state = protocol_tx_match_messageid(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_match_messageid(&child, cfg, &state));
                 break;
             case PRLTxTransmissionError:
-                state = protocol_tx_transmission_error(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_transmission_error(&child, cfg, &state));
                 break;
             case PRLTxMessageSent:
-                state = protocol_tx_message_sent(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_message_sent(&child, cfg, &state));
                 break;
             case PRLTxDiscardMessage:
-                state = protocol_tx_discard_message(cfg);
+                PT_SPAWN(pt, &child, protocol_tx_discard_message(&child, cfg, &state));
                 break;
             default:
                 /* This is an error.  It really shouldn't happen.  We might
@@ -278,10 +314,10 @@ static THD_FUNCTION(ProtocolTX, vcfg) {
                 break;
         }
     }
+    PT_END(pt);
 }
 
 void pdb_prltx_run(struct pdb_config *cfg)
 {
-    cfg->prl.tx_thread = chThdCreateStatic(cfg->prl._tx_wa,
-            sizeof(cfg->prl._tx_wa), PDB_PRIO_PRL, ProtocolTX, cfg);
+    (void)PT_SCHEDULE(ProtocolTX(&cfg->prl.tx_thread, cfg));
 }

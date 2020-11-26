@@ -20,9 +20,6 @@
 
 #include <stdint.h>
 
-#include <ch.h>
-
-
 /*
  * Macros for working with USB Power Delivery messages.
  *
@@ -114,7 +111,6 @@
 #define PD_NUMOBJ(n) (((n) << PD_HDR_NUMOBJ_SHIFT) & PD_HDR_NUMOBJ)
 #define PD_NUMOBJ_GET(msg) (((msg)->hdr & PD_HDR_NUMOBJ) >> PD_HDR_NUMOBJ_SHIFT)
 
-
 /*
  * PD Extended Message Header
  */
@@ -133,8 +129,8 @@
 
 /* Chunk number */
 #define PD_CHUNK_NUMBER(n) (((n) << PD_EXTHDR_CHUNK_NUMBER_SHIFT) & PD_EXTHDR_CHUNK_NUMBER)
-#define PD_CHUNK_NUMBER_GET(msg) (((msg)->exthdr & PD_EXTHDR_CHUNK_NUMBER) >> PD_EXTHDR_CHUNK_NUMBER_SHIFT)
-
+#define PD_CHUNK_NUMBER_GET(msg)                                                                   \
+    (((msg)->exthdr & PD_EXTHDR_CHUNK_NUMBER) >> PD_EXTHDR_CHUNK_NUMBER_SHIFT)
 
 /*
  * PD Power Data Object
@@ -143,10 +139,10 @@
 #define PD_PDO_TYPE (0x3 << PD_PDO_TYPE_SHIFT)
 
 /* PDO types */
-#define PD_PDO_TYPE_FIXED ((unsigned) (0x0 << PD_PDO_TYPE_SHIFT))
-#define PD_PDO_TYPE_BATTERY ((unsigned) (0x1 << PD_PDO_TYPE_SHIFT))
-#define PD_PDO_TYPE_VARIABLE ((unsigned) (0x2 << PD_PDO_TYPE_SHIFT))
-#define PD_PDO_TYPE_AUGMENTED ((unsigned) (0x3 << PD_PDO_TYPE_SHIFT))
+#define PD_PDO_TYPE_FIXED ((unsigned)(0x0 << PD_PDO_TYPE_SHIFT))
+#define PD_PDO_TYPE_BATTERY ((unsigned)(0x1 << PD_PDO_TYPE_SHIFT))
+#define PD_PDO_TYPE_VARIABLE ((unsigned)(0x2 << PD_PDO_TYPE_SHIFT))
+#define PD_PDO_TYPE_AUGMENTED ((unsigned)(0x3 << PD_PDO_TYPE_SHIFT))
 
 #define PD_APDO_TYPE_SHIFT 28
 #define PD_APDO_TYPE (0x3 << PD_APDO_TYPE_SHIFT)
@@ -175,10 +171,12 @@
 #define PD_PDO_SRC_FIXED_CURRENT (0x3FF << PD_PDO_SRC_FIXED_CURRENT_SHIFT)
 
 /* PD Source Fixed PDO current */
-#define PD_PDO_SRC_FIXED_CURRENT_GET(pdo) (((pdo) & PD_PDO_SRC_FIXED_CURRENT) >> PD_PDO_SRC_FIXED_CURRENT_SHIFT)
+#define PD_PDO_SRC_FIXED_CURRENT_GET(pdo)                                                          \
+    (((pdo)&PD_PDO_SRC_FIXED_CURRENT) >> PD_PDO_SRC_FIXED_CURRENT_SHIFT)
 
 /* PD Source Fixed PDO voltage */
-#define PD_PDO_SRC_FIXED_VOLTAGE_GET(pdo) (((pdo) & PD_PDO_SRC_FIXED_VOLTAGE) >> PD_PDO_SRC_FIXED_VOLTAGE_SHIFT)
+#define PD_PDO_SRC_FIXED_VOLTAGE_GET(pdo)                                                          \
+    (((pdo)&PD_PDO_SRC_FIXED_VOLTAGE) >> PD_PDO_SRC_FIXED_VOLTAGE_SHIFT)
 
 /* PD Programmable Power Supply APDO */
 #define PD_APDO_PPS_MAX_VOLTAGE_SHIFT 17
@@ -189,14 +187,19 @@
 #define PD_APDO_PPS_CURRENT (0x7F << PD_APDO_PPS_CURRENT_SHIFT)
 
 /* PD Programmable Power Supply APDO voltages */
-#define PD_APDO_PPS_MAX_VOLTAGE_GET(pdo) (((pdo) & PD_APDO_PPS_MAX_VOLTAGE) >> PD_APDO_PPS_MAX_VOLTAGE_SHIFT)
-#define PD_APDO_PPS_MIN_VOLTAGE_GET(pdo) (((pdo) & PD_APDO_PPS_MIN_VOLTAGE) >> PD_APDO_PPS_MIN_VOLTAGE_SHIFT)
+#define PD_APDO_PPS_MAX_VOLTAGE_GET(pdo)                                                           \
+    (((pdo)&PD_APDO_PPS_MAX_VOLTAGE) >> PD_APDO_PPS_MAX_VOLTAGE_SHIFT)
+#define PD_APDO_PPS_MIN_VOLTAGE_GET(pdo)                                                           \
+    (((pdo)&PD_APDO_PPS_MIN_VOLTAGE) >> PD_APDO_PPS_MIN_VOLTAGE_SHIFT)
 
-#define PD_APDO_PPS_MAX_VOLTAGE_SET(v) (((v) << PD_APDO_PPS_MAX_VOLTAGE_SHIFT) & PD_APDO_PPS_MAX_VOLTAGE)
-#define PD_APDO_PPS_MIN_VOLTAGE_SET(v) (((v) << PD_APDO_PPS_MIN_VOLTAGE_SHIFT) & PD_APDO_PPS_MIN_VOLTAGE)
+#define PD_APDO_PPS_MAX_VOLTAGE_SET(v)                                                             \
+    (((v) << PD_APDO_PPS_MAX_VOLTAGE_SHIFT) & PD_APDO_PPS_MAX_VOLTAGE)
+#define PD_APDO_PPS_MIN_VOLTAGE_SET(v)                                                             \
+    (((v) << PD_APDO_PPS_MIN_VOLTAGE_SHIFT) & PD_APDO_PPS_MIN_VOLTAGE)
 
 /* PD Programmable Power Supply APDO current */
-#define PD_APDO_PPS_CURRENT_GET(pdo) ((uint8_t) (((pdo) & PD_APDO_PPS_CURRENT) >> PD_APDO_PPS_CURRENT_SHIFT))
+#define PD_APDO_PPS_CURRENT_GET(pdo)                                                               \
+    ((uint8_t)(((pdo)&PD_APDO_PPS_CURRENT) >> PD_APDO_PPS_CURRENT_SHIFT))
 
 #define PD_APDO_PPS_CURRENT_SET(i) (((i) << PD_APDO_PPS_CURRENT_SHIFT) & PD_APDO_PPS_CURRENT)
 
@@ -219,13 +222,14 @@
 #define PD_PDO_SNK_FIXED_CURRENT (0x3FF << PD_PDO_SNK_FIXED_CURRENT_SHIFT)
 
 /* PD Sink Fixed PDO current */
-#define PD_PDO_SNK_FIXED_CURRENT_SET(i) (((i) << PD_PDO_SNK_FIXED_CURRENT_SHIFT) & PD_PDO_SNK_FIXED_CURRENT)
+#define PD_PDO_SNK_FIXED_CURRENT_SET(i)                                                            \
+    (((i) << PD_PDO_SNK_FIXED_CURRENT_SHIFT) & PD_PDO_SNK_FIXED_CURRENT)
 
 /* PD Sink Fixed PDO voltage */
-#define PD_PDO_SNK_FIXED_VOLTAGE_SET(v) (((v) << PD_PDO_SNK_FIXED_VOLTAGE_SHIFT) & PD_PDO_SNK_FIXED_VOLTAGE)
+#define PD_PDO_SNK_FIXED_VOLTAGE_SET(v)                                                            \
+    (((v) << PD_PDO_SNK_FIXED_VOLTAGE_SHIFT) & PD_PDO_SNK_FIXED_VOLTAGE)
 
 /* TODO: other types of sink PDO */
-
 
 /*
  * PD Request Data Object
@@ -272,13 +276,16 @@
 #define PD_RDO_PROG_VOLTAGE_SET(i) (((i) << PD_RDO_PROG_VOLTAGE_SHIFT) & PD_RDO_PROG_VOLTAGE)
 #define PD_RDO_PROG_CURRENT_SET(i) (((i) << PD_RDO_PROG_CURRENT_SHIFT) & PD_RDO_PROG_CURRENT)
 
-
 /*
  * Time values
  *
  * Where a range is specified, the middle of the range (rounded down to the
  * nearest millisecond) is used.
  */
+
+#define TIME_MS2I(ms) ms
+#define TIME_S2I(s) (s * 1000)
+
 #define PD_T_CHUNKING_NOT_SUPPORTED TIME_MS2I(45)
 #define PD_T_HARD_RESET_COMPLETE TIME_MS2I(4)
 #define PD_T_PS_TRANSITION TIME_MS2I(500)
@@ -289,12 +296,10 @@
 /* This is actually from Type-C, not Power Delivery, but who cares? */
 #define PD_T_PD_DEBOUNCE TIME_MS2I(15)
 
-
 /*
  * Counter maximums
  */
 #define PD_N_HARD_RESET_COUNT 2
-
 
 /*
  * Value parameters
@@ -302,7 +307,6 @@
 #define PD_MAX_EXT_MSG_LEN 260
 #define PD_MAX_EXT_MSG_CHUNK_LEN 26
 #define PD_MAX_EXT_MSG_LEGACY_LEN 26
-
 
 /*
  * Unit conversions
@@ -331,17 +335,17 @@
 #define PD_MV2PRV(mv) ((mv) / 20)
 #define PD_MV2PDV(mv) ((mv) / 50)
 #define PD_MV2PAV(mv) ((mv) / 100)
-#define PD_PRV2MV(prv) ((prv) * 20)
-#define PD_PDV2MV(pdv) ((pdv) * 50)
-#define PD_PAV2MV(pav) ((pav) * 100)
+#define PD_PRV2MV(prv) ((prv)*20)
+#define PD_PDV2MV(pdv) ((pdv)*50)
+#define PD_PAV2MV(pav) ((pav)*100)
 
 #define PD_MA2CA(ma) (((ma) + 10 - 1) / 10)
 #define PD_MA2PDI(ma) (((ma) + 10 - 1) / 10)
 #define PD_MA2PAI(ma) (((ma) + 50 - 1) / 50)
 #define PD_CA2PAI(ca) (((ca) + 5 - 1) / 5)
-#define PD_PDI2MA(pdi) ((pdi) * 10)
-#define PD_PAI2MA(pai) ((pai) * 50)
-#define PD_PAI2CA(pai) ((pai) * 5)
+#define PD_PDI2MA(pdi) ((pdi)*10)
+#define PD_PAI2MA(pai) ((pai)*50)
+#define PD_PAI2CA(pai) ((pai)*5)
 
 #define PD_MW2CW(mw) ((mw) / 10)
 
@@ -392,6 +396,5 @@
 
 #define PD_MO_MIN 500
 #define PD_MO_MAX 655350
-
 
 #endif /* PDB_PD_H */

@@ -17,16 +17,18 @@
 
 #include "messages.h"
 
+#include <stddef.h>
+
 #include <pdb_msg.h>
 
 #include "pdb_conf.h"
 
 
 /* The messages that will be available for threads to pass each other */
-static union pd_msg pd_messages[PDB_MSG_POOL_SIZE] __attribute__((aligned(sizeof(stkalign_t))));
+static union pd_msg pd_messages[PDB_MSG_POOL_SIZE];
 
 /* The pool of available messages */
-memory_pool_t pdb_msg_pool;
+void* pdb_msg_pool;
 
 
 void pdb_msg_pool_init(void)

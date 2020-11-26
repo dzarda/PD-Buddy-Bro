@@ -17,9 +17,6 @@
 
 #include "int_n.h"
 
-#include <ch.h>
-#include <hal.h>
-
 #include <pdb.h>
 #include "priorities.h"
 #include "fusb302b.h"
@@ -32,21 +29,22 @@
 /*
  * INT_N polling thread
  */
-static THD_FUNCTION(IntNPoll, vcfg) {
-    struct pdb_config *cfg = vcfg;
+static PT_THREAD(IntNPoll(struct pt *pt, struct pdb_config *cfg))
+{
+    PT_BEGIN(pt);
 
-    union fusb_status status;
-    eventmask_t events;
+    static union fusb_status status;
+    static uint32_t events;
 
     while (true) {
         /* If the INT_N line is low */
-        if (palReadLine(cfg->fusb.int_n) == PAL_LOW) {
+        if (fusb_intn_asserted(&cfg->fusb)) {
             /* Read the FUSB302B status and interrupt registers */
             fusb_get_status(&cfg->fusb, &status);
 
             /* If the I_GCRCSENT flag is set, tell the Protocol RX thread */
             if (status.interruptb & FUSB_INTERRUPTB_I_GCRCSENT) {
-                chEvtSignal(cfg->prl.rx_thread, PDB_EVT_PRLRX_I_GCRCSENT);
+                cfg->prl.rx_events |= PDB_EVT_PRLRX_I_GCRCSENT;
             }
 
             /* If the I_TXSENT or I_RETRYFAIL flag is set, tell the Protocol TX
@@ -58,7 +56,7 @@ static THD_FUNCTION(IntNPoll, vcfg) {
             if (status.interrupta & FUSB_INTERRUPTA_I_TXSENT) {
                 events |= PDB_EVT_PRLTX_I_TXSENT;
             }
-            chEvtSignal(cfg->prl.tx_thread, events);
+            cfg->prl.tx_events |= events;
 
             /* If the I_HARDRST or I_HARDSENT flag is set, tell the Hard Reset
              * thread */
@@ -69,22 +67,21 @@ static THD_FUNCTION(IntNPoll, vcfg) {
             if (status.interrupta & FUSB_INTERRUPTA_I_HARDSENT) {
                 events |= PDB_EVT_HARDRST_I_HARDSENT;
             }
-            chEvtSignal(cfg->prl.hardrst_thread, events);
+            cfg->prl.hardrst_events |= events;
 
             /* If the I_OCP_TEMP and OVRTEMP flags are set, tell the Policy
              * Engine thread */
             if (status.interrupta & FUSB_INTERRUPTA_I_OCP_TEMP
                     && status.status1 & FUSB_STATUS1_OVRTEMP) {
-                chEvtSignal(cfg->pe.thread, PDB_EVT_PE_I_OVRTEMP);
+                cfg->pe.events |= PDB_EVT_PE_I_OVRTEMP;
             }
 
         }
-        chThdSleepMilliseconds(1);
     }
+    PT_END(pt);
 }
 
 void pdb_int_n_run(struct pdb_config *cfg)
 {
-    cfg->int_n.thread = chThdCreateStatic(cfg->int_n._wa,
-            sizeof(cfg->int_n._wa), PDB_PRIO_PRL_INT_N, IntNPoll, cfg);
+    (void)PT_SCHEDULE(IntNPoll(&cfg->int_n.thread, cfg));
 }

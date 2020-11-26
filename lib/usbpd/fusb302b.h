@@ -24,7 +24,6 @@
 
 #include <pdb_msg.h>
 
-
 /* Device ID register */
 #define FUSB_DEVICE_ID 0x01
 #define FUSB_DEVICE_ID_VERSION_ID_SHIFT 4
@@ -240,7 +239,6 @@
 #define FUSB_FIFO_RX_SOP1DB 0x80
 #define FUSB_FIFO_RX_SOP2DB 0x60
 
-
 /*
  * FUSB status union
  *
@@ -260,8 +258,12 @@ union fusb_status {
     };
 };
 
-
 /* FUSB functions */
+
+/*
+ * Is the INT_N line low?
+ */
+bool fusb_intn_asserted(struct pdb_fusb_config *cfg);
 
 /*
  * Send a USB Power Delivery message to the FUSB302B
@@ -297,6 +299,5 @@ void fusb_setup(struct pdb_fusb_config *);
  * Reset the FUSB302B
  */
 void fusb_reset(struct pdb_fusb_config *cfg);
-
 
 #endif /* PDB_FUSB302B_H */

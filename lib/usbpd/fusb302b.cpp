@@ -15,13 +15,13 @@
  * limitations under the License.
  */
 
-#include "fusb302b.h"
-
-#include <ch.h>
-#include <hal.h>
-
 #include <pd.h>
 
+#include "board.hpp"
+
+extern "C" {
+
+#include "fusb302b.h"
 
 /*
  * Read a single byte from the FUSB302B
@@ -31,10 +31,10 @@
  *
  * Returns the value read from addr.
  */
-static uint8_t fusb_read_byte(struct pdb_fusb_config *cfg, uint8_t addr)
-{
-    uint8_t buf;
-    i2cMasterTransmit(cfg->i2cp, cfg->addr, &addr, 1, &buf, 1);
+static uint8_t fusb_read_byte(struct pdb_fusb_config *cfg, uint8_t addr) {
+    uint8_t buf = 0;
+    i2c_write(cfg->addr, &addr, 1);
+    i2c_read(cfg->addr, &buf, 1);
     return buf;
 }
 
@@ -46,10 +46,9 @@ static uint8_t fusb_read_byte(struct pdb_fusb_config *cfg, uint8_t addr)
  * size: The number of bytes to read
  * buf: The buffer into which data will be read
  */
-static void fusb_read_buf(struct pdb_fusb_config *cfg, uint8_t addr,
-        uint8_t size, uint8_t *buf)
-{
-    i2cMasterTransmit(cfg->i2cp, cfg->addr, &addr, 1, buf, size);
+static void fusb_read_buf(struct pdb_fusb_config *cfg, uint8_t addr, uint8_t size, uint8_t *buf) {
+    i2c_write(cfg->addr, &addr, 1);
+    i2c_read(cfg->addr, buf, size);
 }
 
 /*
@@ -59,11 +58,9 @@ static void fusb_read_buf(struct pdb_fusb_config *cfg, uint8_t addr,
  * addr: The memory address to which we will write
  * byte: The value to write
  */
-static void fusb_write_byte(struct pdb_fusb_config *cfg, uint8_t addr,
-        uint8_t byte)
-{
+static void fusb_write_byte(struct pdb_fusb_config *cfg, uint8_t addr, uint8_t byte) {
     uint8_t buf[2] = {addr, byte};
-    i2cMasterTransmit(cfg->i2cp, cfg->addr, buf, 2, NULL, 0);
+    i2c_write(cfg->addr, buf, sizeof(buf));
 }
 
 /*
@@ -74,9 +71,8 @@ static void fusb_write_byte(struct pdb_fusb_config *cfg, uint8_t addr,
  * size: The number of bytes to write
  * buf: The buffer to write
  */
-static void fusb_write_buf(struct pdb_fusb_config *cfg, uint8_t addr,
-        uint8_t size, const uint8_t *buf)
-{
+static void fusb_write_buf(struct pdb_fusb_config *cfg, uint8_t addr, uint8_t size,
+                           const uint8_t *buf) {
     uint8_t txbuf[size + 1];
 
     /* Prepare the transmit buffer */
@@ -85,28 +81,25 @@ static void fusb_write_buf(struct pdb_fusb_config *cfg, uint8_t addr,
         txbuf[i + 1] = buf[i];
     }
 
-    i2cMasterTransmit(cfg->i2cp, cfg->addr, txbuf, size + 1, NULL, 0);
+    i2c_write(cfg->addr, txbuf, sizeof(txbuf));
 }
 
-void fusb_send_message(struct pdb_fusb_config *cfg, const union pd_msg *msg)
-{
+static void delay_ms(int delay) {
+    HAL_Delay(delay);
+}
+
+bool fusb_intn_asserted(struct pdb_fusb_config *cfg) {
+    return usb_pd_irq_asserted();
+}
+
+void fusb_send_message(struct pdb_fusb_config *cfg, const union pd_msg *msg) {
     /* Token sequences for the FUSB302B */
-    static uint8_t sop_seq[5] = {
-        FUSB_FIFO_TX_SOP1,
-        FUSB_FIFO_TX_SOP1,
-        FUSB_FIFO_TX_SOP1,
-        FUSB_FIFO_TX_SOP2,
-        FUSB_FIFO_TX_PACKSYM
-    };
-    static uint8_t eop_seq[4] = {
-        FUSB_FIFO_TX_JAM_CRC,
-        FUSB_FIFO_TX_EOP,
-        FUSB_FIFO_TX_TXOFF,
-        FUSB_FIFO_TX_TXON
-    };
+    static uint8_t sop_seq[5] = {FUSB_FIFO_TX_SOP1, FUSB_FIFO_TX_SOP1, FUSB_FIFO_TX_SOP1,
+                                 FUSB_FIFO_TX_SOP2, FUSB_FIFO_TX_PACKSYM};
+    static uint8_t eop_seq[4] = {FUSB_FIFO_TX_JAM_CRC, FUSB_FIFO_TX_EOP, FUSB_FIFO_TX_TXOFF,
+                                 FUSB_FIFO_TX_TXON};
 
     /* Take the I2C2 mutex now so there can't be a race condition on sop_seq */
-    i2cAcquireBus(cfg->i2cp);
 
     /* Get the length of the message: a two-octet header plus NUMOBJ four-octet
      * data objects */
@@ -119,23 +112,16 @@ void fusb_send_message(struct pdb_fusb_config *cfg, const union pd_msg *msg)
     fusb_write_buf(cfg, FUSB_FIFOS, 5, sop_seq);
     fusb_write_buf(cfg, FUSB_FIFOS, msg_len, msg->bytes);
     fusb_write_buf(cfg, FUSB_FIFOS, 4, eop_seq);
-
-    i2cReleaseBus(cfg->i2cp);
 }
 
-uint8_t fusb_read_message(struct pdb_fusb_config *cfg, union pd_msg *msg)
-{
+uint8_t fusb_read_message(struct pdb_fusb_config *cfg, union pd_msg *msg) {
     uint8_t garbage[4];
     uint8_t numobj;
-
-    i2cAcquireBus(cfg->i2cp);
 
     /* If this isn't an SOP message, return error.
      * Because of our configuration, we should be able to assume this means the
      * buffer is empty, and not try to read past a non-SOP message. */
-    if ((fusb_read_byte(cfg, FUSB_FIFOS) & FUSB_FIFO_RX_TOKEN_BITS)
-            != FUSB_FIFO_RX_SOP) {
-        i2cReleaseBus(cfg->i2cp);
+    if ((fusb_read_byte(cfg, FUSB_FIFOS) & FUSB_FIFO_RX_TOKEN_BITS) != FUSB_FIFO_RX_SOP) {
         return 1;
     }
     /* Read the message header into msg */
@@ -149,24 +135,15 @@ uint8_t fusb_read_message(struct pdb_fusb_config *cfg, union pd_msg *msg)
     /* Throw the CRC32 in the garbage, since the PHY already checked it. */
     fusb_read_buf(cfg, FUSB_FIFOS, 4, garbage);
 
-    i2cReleaseBus(cfg->i2cp);
     return 0;
 }
 
-void fusb_send_hardrst(struct pdb_fusb_config *cfg)
-{
-    i2cAcquireBus(cfg->i2cp);
-
+void fusb_send_hardrst(struct pdb_fusb_config *cfg) {
     /* Send a hard reset */
     fusb_write_byte(cfg, FUSB_CONTROL3, 0x07 | FUSB_CONTROL3_SEND_HARD_RESET);
-
-    i2cReleaseBus(cfg->i2cp);
 }
 
-void fusb_setup(struct pdb_fusb_config *cfg)
-{
-    i2cAcquireBus(cfg->i2cp);
-
+void fusb_setup(struct pdb_fusb_config *cfg) {
     /* Fully reset the FUSB302B */
     fusb_write_byte(cfg, FUSB_RESET, FUSB_RESET_SW_RES);
 
@@ -187,12 +164,12 @@ void fusb_setup(struct pdb_fusb_config *cfg)
 
     /* Measure CC1 */
     fusb_write_byte(cfg, FUSB_SWITCHES0, 0x07);
-    chThdSleepMicroseconds(250);
+    delay_ms(1);
     uint8_t cc1 = fusb_read_byte(cfg, FUSB_STATUS0) & FUSB_STATUS0_BC_LVL;
 
     /* Measure CC2 */
     fusb_write_byte(cfg, FUSB_SWITCHES0, 0x0B);
-    chThdSleepMicroseconds(250);
+    delay_ms(1);
     uint8_t cc2 = fusb_read_byte(cfg, FUSB_STATUS0) & FUSB_STATUS0_BC_LVL;
 
     /* Select the correct CC line for BMC signaling; also enable AUTO_CRC */
@@ -206,43 +183,28 @@ void fusb_setup(struct pdb_fusb_config *cfg)
 
     /* Reset the PD logic */
     fusb_write_byte(cfg, FUSB_RESET, FUSB_RESET_PD_RESET);
-
-    i2cReleaseBus(cfg->i2cp);
 }
 
-void fusb_get_status(struct pdb_fusb_config *cfg, union fusb_status *status)
-{
-    i2cAcquireBus(cfg->i2cp);
-
+void fusb_get_status(struct pdb_fusb_config *cfg, union fusb_status *status) {
     /* Read the interrupt and status flags into status */
     fusb_read_buf(cfg, FUSB_STATUS0A, 7, status->bytes);
-
-    i2cReleaseBus(cfg->i2cp);
 }
 
-enum fusb_typec_current fusb_get_typec_current(struct pdb_fusb_config *cfg)
-{
-    i2cAcquireBus(cfg->i2cp);
-
+enum fusb_typec_current fusb_get_typec_current(struct pdb_fusb_config *cfg) {
     /* Read the BC_LVL into a variable */
-    enum fusb_typec_current bc_lvl = fusb_read_byte(cfg, FUSB_STATUS0)
-        & FUSB_STATUS0_BC_LVL;
-
-    i2cReleaseBus(cfg->i2cp);
+    enum fusb_typec_current bc_lvl =
+        (fusb_typec_current)(fusb_read_byte(cfg, FUSB_STATUS0) & FUSB_STATUS0_BC_LVL);
 
     return bc_lvl;
 }
 
-void fusb_reset(struct pdb_fusb_config *cfg)
-{
-    i2cAcquireBus(cfg->i2cp);
-
+void fusb_reset(struct pdb_fusb_config *cfg) {
     /* Flush the TX buffer */
     fusb_write_byte(cfg, FUSB_CONTROL0, 0x44);
     /* Flush the RX buffer */
     fusb_write_byte(cfg, FUSB_CONTROL1, FUSB_CONTROL1_RX_FLUSH);
     /* Reset the PD logic */
     fusb_write_byte(cfg, FUSB_RESET, FUSB_RESET_PD_RESET);
-
-    i2cReleaseBus(cfg->i2cp);
 }
+
+} // extern "C"

@@ -18,21 +18,18 @@
 #ifndef PDB_HARD_RESET_H
 #define PDB_HARD_RESET_H
 
-#include <ch.h>
-
-#include <pdb.h>
-
+#include "pdb.h"
+#include <stdint.h>
 
 /* Events for the Hard Reset thread */
-#define PDB_EVT_HARDRST_RESET EVENT_MASK(0)
-#define PDB_EVT_HARDRST_I_HARDRST EVENT_MASK(1)
-#define PDB_EVT_HARDRST_I_HARDSENT EVENT_MASK(2)
-#define PDB_EVT_HARDRST_DONE EVENT_MASK(3)
+#define PDB_EVT_HARDRST_RESET PDB_EVENT_MASK(0)
+#define PDB_EVT_HARDRST_I_HARDRST PDB_EVENT_MASK(1)
+#define PDB_EVT_HARDRST_I_HARDSENT PDB_EVENT_MASK(2)
+#define PDB_EVT_HARDRST_DONE PDB_EVENT_MASK(3)
 
 /*
  * Start the Hard Reset thread
  */
 void pdb_hardrst_run(struct pdb_config *cfg);
-
 
 #endif /* PDB_HARD_RESET_H */

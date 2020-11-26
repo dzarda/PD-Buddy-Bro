@@ -18,20 +18,23 @@
 #ifndef PDB_H
 #define PDB_H
 
-#include <pdb_fusb.h>
+#define LC_INCLUDE "lc-addrlabels.h"
+#define PDB_EVENT_MASK(eid) ((uint32_t)(1 << (eid)))
+
 #include <pdb_dpm.h>
-#include <pdb_pe.h>
-#include <pdb_prl.h>
+#include <pdb_fusb.h>
 #include <pdb_int_n.h>
 #include <pdb_msg.h>
+#include <pdb_pe.h>
+#include <pdb_prl.h>
 
+#include <stddef.h>
 
 /* Version information */
 #define PDB_LIB_VERSION "0.1.0"
 #define PDB_LIB_MAJOR 0
 #define PDB_LIB_MINOR 1
 #define PDB_LIB_PATCH 0
-
 
 /*
  * Structure for one USB port's PD Buddy firmware library configuration
@@ -57,13 +60,18 @@ struct pdb_config {
     struct pdb_int_n int_n;
 };
 
-
 /*
- * Initialize the PD Buddy firmware library, starting all its threads
+ * Initialize the PD Buddy firmware library.
  *
  * The I2C driver must already be initialized before calling this function.
  */
 void pdb_init(struct pdb_config *);
 
+/*
+ * Poll the PD Buddy continuations.
+ *
+ * pdb_init() must already have been called first.
+ */
+void pdb_poll(struct pdb_config *cfg);
 
 #endif /* PDB_H */

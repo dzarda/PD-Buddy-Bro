@@ -18,8 +18,6 @@
 #ifndef PDB_POLICY_ENGINE_H
 #define PDB_POLICY_ENGINE_H
 
-#include <ch.h>
-
 #include <pdb.h>
 
 /*
@@ -28,19 +26,17 @@
  * NOTE: If any more events are needed, make sure they don't overlap the ones
  * in include/pdb_pe.h!
  */
-#define PDB_EVT_PE_RESET EVENT_MASK(0)
-#define PDB_EVT_PE_MSG_RX EVENT_MASK(1)
-#define PDB_EVT_PE_TX_DONE EVENT_MASK(2)
-#define PDB_EVT_PE_TX_ERR EVENT_MASK(3)
-#define PDB_EVT_PE_HARD_SENT EVENT_MASK(4)
-#define PDB_EVT_PE_I_OVRTEMP EVENT_MASK(5)
-#define PDB_EVT_PE_PPS_REQUEST EVENT_MASK(6)
-
+#define PDB_EVT_PE_RESET PDB_EVENT_MASK(0)
+#define PDB_EVT_PE_MSG_RX PDB_EVENT_MASK(1)
+#define PDB_EVT_PE_TX_DONE PDB_EVENT_MASK(2)
+#define PDB_EVT_PE_TX_ERR PDB_EVENT_MASK(3)
+#define PDB_EVT_PE_HARD_SENT PDB_EVENT_MASK(4)
+#define PDB_EVT_PE_I_OVRTEMP PDB_EVENT_MASK(5)
+#define PDB_EVT_PE_PPS_REQUEST PDB_EVENT_MASK(6)
 
 /*
- * Start the Policy Engine thread
+ * Schedule  the Policy Engine thread
  */
 void pdb_pe_run(struct pdb_config *cfg);
-
 
 #endif /* PDB_POLICY_ENGINE_H */

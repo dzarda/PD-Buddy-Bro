@@ -32,15 +32,18 @@ void pdb_init(struct pdb_config *cfg)
 
     /* Initialize the FUSB302B */
     fusb_setup(&cfg->fusb);
+}
 
-    /* Create the policy engine thread. */
+void pdb_poll(struct pdb_config *cfg)
+{
+    /* Schedule the policy engine thread. */
     pdb_pe_run(cfg);
 
-    /* Create the protocol layer threads. */
+    /* Schedule the protocol layer threads. */
     pdb_prlrx_run(cfg);
     pdb_prltx_run(cfg);
     pdb_hardrst_run(cfg);
 
-    /* Create the INT_N thread. */
+    /* Schedule the INT_N thread. */
     pdb_int_n_run(cfg);
 }

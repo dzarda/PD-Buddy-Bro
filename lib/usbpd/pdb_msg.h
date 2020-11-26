@@ -20,9 +20,6 @@
 
 #include <stdint.h>
 
-#include <ch.h>
-
-
 /*
  * PD message union
  *
@@ -54,7 +51,6 @@ union pd_msg {
 /*
  * The pool of messages used by the library
  */
-extern memory_pool_t pdb_msg_pool;
-
+extern void *pdb_msg_pool;
 
 #endif /* PDB_MSG_H */

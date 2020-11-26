@@ -18,7 +18,7 @@
 #ifndef PDB_FUSB_H
 #define PDB_FUSB_H
 
-#include <hal.h>
+#include <stdint.h>
 
 /* I2C addresses of the FUSB302B chips */
 #define FUSB302B_ADDR 0x22
@@ -26,17 +26,14 @@
 #define FUSB302B10_ADDR 0x24
 #define FUSB302B11_ADDR 0x25
 
-
 /*
  * Configuration for the FUSB302B chip
  */
 struct pdb_fusb_config {
-    /* The I2C driver for the bus that the chip is connected to */
-    I2CDriver *i2cp;
     /* The I2C address of the chip */
-    i2caddr_t addr;
+    uint8_t addr;
     /* The INT_N line */
-    ioline_t int_n;
+    void *int_n;
 };
 
 /*
@@ -50,6 +47,5 @@ enum fusb_typec_current {
     fusb_tcc_3_0 = 3,
     fusb_sink_tx_ok = 3
 };
-
 
 #endif /* PDB_FUSB_H */

@@ -21,29 +21,26 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <ch.h>
-
 #include "pdb_conf.h"
 
 /*
  * Events for the Policy Engine thread, sent by user code
  */
 /* Tell the PE to send a Get_Source_Cap message */
-#define PDB_EVT_PE_GET_SOURCE_CAP EVENT_MASK(7)
+#define PDB_EVT_PE_GET_SOURCE_CAP PDB_EVENT_MASK(7)
 /* Tell the PE that new power is required */
-#define PDB_EVT_PE_NEW_POWER EVENT_MASK(8)
-
+#define PDB_EVT_PE_NEW_POWER PDB_EVENT_MASK(8)
 
 /*
  * Structure for Policy Engine thread and variables
  */
 struct pdb_pe {
     /* Policy Engine thread and working area */
-    THD_WORKING_AREA(_wa, PDB_PE_WA_SIZE);
-    thread_t *thread;
+    struct pt thread;
+    uint32_t events;
 
     /* PE mailbox for received PD messages */
-    mailbox_t mailbox;
+    void *mailbox;
     /* PD message header template */
     uint16_t hdr_template;
 
@@ -64,10 +61,9 @@ struct pdb_pe {
     /* The index of the just-requested PPS APDO */
     uint8_t _last_pps;
     /* Virtual timer for SinkPPSPeriodicTimer */
-    virtual_timer_t _sink_pps_periodic_timer;
+    void *_sink_pps_periodic_timer;
     /* Queue for the PE mailbox */
-    msg_t _mailbox_queue[PDB_MSG_POOL_SIZE];
+    void *_mailbox_queue[PDB_MSG_POOL_SIZE];
 };
-
 
 #endif /* PDB_PE_H */

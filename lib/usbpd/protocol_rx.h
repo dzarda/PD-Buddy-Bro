@@ -20,19 +20,15 @@
 
 #include <stdint.h>
 
-#include <ch.h>
-
 #include <pdb.h>
 
-
 /* Events for the Protocol RX thread */
-#define PDB_EVT_PRLRX_RESET EVENT_MASK(0)
-#define PDB_EVT_PRLRX_I_GCRCSENT EVENT_MASK(1)
+#define PDB_EVT_PRLRX_RESET PDB_EVENT_MASK(0)
+#define PDB_EVT_PRLRX_I_GCRCSENT PDB_EVENT_MASK(1)
 
 /*
  * Start the Protocol RX thread
  */
 void pdb_prlrx_run(struct pdb_config *cfg);
-
 
 #endif /* PDB_PROTOCOL_RX_H */
